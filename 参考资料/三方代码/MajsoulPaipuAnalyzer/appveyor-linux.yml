@@ -1,0 +1,53 @@
+version: 1.0.{build}
+image: Ubuntu1804
+branches:
+  only:
+  - master
+build_script:
+- sh: >-
+    nvm install stable
+
+    nvm use stable
+
+    git submodule init
+
+    git submodule update
+
+    npm install
+
+    npm run-script package-linux
+
+    mkdir bin
+
+    mkdir bin/release
+
+    cd bin/release
+
+    cmake ../.. -DCMAKE_BUILD_TYPE=Release
+
+    make
+
+    cd ../..
+
+    cp -r dist/MajsoulPaipuCrawler-linux-x64 result
+
+    cp bin/release/PaipuAnalyzer result/
+
+    mkdir result/data
+
+    cp config.json result/
+
+    cp PAADData.json result/
+
+    cp doc/README.txt result/
+
+    cp doc/release-notes.txt result/
+
+    cp -r i18n/ result/
+
+    mv result MajsoulPaipuAnalyzer-linux-x64
+
+    7z a MajsoulPaipuAnalyzer-linux-x64.7z MajsoulPaipuAnalyzer-linux-x64
+artifacts:
+- path: MajsoulPaipuAnalyzer-linux-x64.7z
+  name: MajsoulPaipuAnalyzer-linux-x64

@@ -1,0 +1,22 @@
+{
+  "name": "tensoul",
+  "version": "0.1.0",
+  "description": "Convert MahjongSoul log into tenhou.net/6 format",
+  "main": "index.js",
+  "author": "Equim",
+  "license": "MIT",
+  "repository": "github:Equim-chan/tensoul",
+  "scripts": {
+    "start": "node ."
+  },
+  "dependencies": {
+    "@koa/router": "^13.1.0",
+    "koa": "^2.14.2",
+    "koa-basic-auth": "^4.0.0",
+    "mjsoul": "^2.3.0",
+    "protobufjs": "^7.2.3",
+    "proxy-agent": "^6.4.0",
+    "superagent": "^10.1.0",
+    "superagent-proxy": "^3.0.0"
+  }
+}

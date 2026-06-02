@@ -1,0 +1,83 @@
+name: Release
+
+# GitHub で Release を publish すると Chrome / Edge ストアへ自動申請する。
+# workflow_dispatch から dry_run=true で起動すれば、申請せず認証情報の確認だけ行える。
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "認証情報の確認のみ行い、アップロード・申請はしない"
+        type: boolean
+        default: true
+      targets:
+        description: "申請先ストア"
+        type: choice
+        default: both
+        options:
+          - both
+          - chrome
+          - edge
+      skip_submit_review:
+        description: "アップロードのみ（ドラフト更新だけで審査送信・公開はしない）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.0"
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - run: npm run zip
+
+      - name: Submit to Chrome Web Store and Edge Add-ons
+        run: |
+          # release イベント時は inputs が空になるため both / 本番申請として扱う
+          TARGETS="${{ inputs.targets }}"
+          TARGETS="${TARGETS:-both}"
+          ZIP=$(ls .output/*-chrome.zip)
+
+          ARGS=()
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          if [ "$TARGETS" = "both" ] || [ "$TARGETS" = "chrome" ]; then
+            ARGS+=(--chrome-zip "$ZIP")
+          fi
+          if [ "$TARGETS" = "both" ] || [ "$TARGETS" = "edge" ]; then
+            ARGS+=(--edge-zip "$ZIP")
+          fi
+          # 診断用: ドラフトへアップロードのみ行い、審査送信・公開はしない
+          if [ "${{ inputs.skip_submit_review }}" = "true" ]; then
+            if [ "$TARGETS" = "both" ] || [ "$TARGETS" = "chrome" ]; then
+              ARGS+=(--chrome-skip-submit-review)
+            fi
+            if [ "$TARGETS" = "both" ] || [ "$TARGETS" = "edge" ]; then
+              ARGS+=(--edge-skip-submit-review)
+            fi
+          fi
+
+          echo "submit targets=$TARGETS zip=$ZIP args=${ARGS[*]}"
+          npx wxt submit "${ARGS[@]}"
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}

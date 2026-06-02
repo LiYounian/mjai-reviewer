@@ -1,0 +1,27 @@
+{
+  "name": "majsoul-paipu-crawler",
+  "version": "0.5.7",
+  "description": "Get Paipu from Majsoul",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "package-win": "electron-packager . MajsoulPaipuCrawler --platform=win32 --arch=x64 --out=./dist --overwrite --ignore=\"^/lib/majsoul/.*\\.txt|^/PaipuAnalyzer|^/sampledata|^/UserData|^\\/.vscode|^/data|^/bin|^/result|^/src\"",
+    "package-darwin": "electron-packager . MajsoulPaipuCrawler --platform=darwin --arch=x64 --out=./dist --overwrite --ignore=\"^/lib/majsoul/.*\\.txt|^/PaipuAnalyzer|^/sampledata|^/UserData|^\\/.vscode|^/data|^/bin|^/result|^/src\"",
+    "package-linux": "electron-packager . MajsoulPaipuCrawler --platform=linux --arch=x64 --out=./dist --overwrite --ignore=\"^/lib/majsoul/.*\\.txt|^/PaipuAnalyzer|^/sampledata|^/UserData|^\\/.vscode|^/data|^/bin|^/result|^/src\""
+  },
+  "repository": "https://github.com/zyr17/MajsoulPaipuAnalyzer",
+  "keywords": [
+    "Mahjong"
+  ],
+  "author": "zyr17",
+  "license": "MIT",
+  "devDependencies": {
+    "electron-packager": "^16.0.0"
+  },
+  "dependencies": {
+    "electron": "^22.3.25",
+    "electron-prompt": "^1.6.2",
+    "protobufjs": "^6.11.3",
+    "request": "^2.88.2"
+  }
+}

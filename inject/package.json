@@ -1,0 +1,15 @@
+{
+  "name": "majsoul-tenhou-inject",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Decoder bundle injected into Majsoul page; exposes window.__majDecoder.",
+  "scripts": {
+    "build": "esbuild src/entry.ts --bundle --format=iife --target=es2020 --platform=browser --loader:.json=json --outfile=dist/inject.js --log-level=info",
+    "build:min": "esbuild src/entry.ts --bundle --minify --format=iife --target=es2020 --platform=browser --loader:.json=json --outfile=dist/inject.min.js --log-level=info"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "protobufjs": "^8.4.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,43 @@
+# —— 抓到的实拓数据（含玩家信息，不入库）——
+data/games/
+
+# —— 登录态：含 cookie/localStorage，绝不入库 ——
+data/profile/
+
+# —— 历史 token 路线遗留的敏感凭据（绝不入库）——
+参考资料/历史尝试/config.json*
+参考资料/历史尝试/*.敏感*
+
+# —— inject 子工程构建产物 ——
+inject/node_modules/
+inject/dist/
+
+# —— Python 缓存 ——
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# —— macOS / IDE ——
+.DS_Store
+.idea/
+.vscode/
+
+# —— qwen 协作工具的会话目录（跟项目无关）——
+.qwen/
+
+# —— 临时调试 dump ——
+/tmp/maj-frames/
+/tmp/maj-last-captured.bin
+
+# —— 参考资料里：tensoul 的 node_modules（46MB 的大头）——
+参考资料/三方代码/tensoul/node_modules/
+
+# —— 参考资料里：kbkn3 上游解压的 node_modules（如果以后 npm install 了）——
+参考资料/三方代码/kbkn3-上游解压/node_modules/
+参考资料/三方代码/kbkn3-上游解压/.output/
+
+# —— 参考项目（MajsoulPaipuAnalyzer）的可能 build 产物 ——
+参考资料/三方代码/MajsoulPaipuAnalyzer/dist/
+参考资料/三方代码/MajsoulPaipuAnalyzer/build/

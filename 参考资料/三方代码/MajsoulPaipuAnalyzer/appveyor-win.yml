@@ -1,0 +1,57 @@
+version: 1.0.{build}
+branches:
+  only:
+  - master
+build_script:
+- ps: >-
+    $env:PATH = $env:PATH -replace "C:[\\/]Program Files[\\/]Git[\\/]usr[\\/]bin[\\/]?;", ""
+
+
+    $env:PATH = "C:\\mingw-w64\\x86_64-8.1.0-posix-seh-rt_v6-rev0\\mingw64\\bin;" + $env:PATH
+
+    git submodule init
+
+    git submodule update
+
+    nvm install stable
+
+    nvm use stable
+
+    npm install
+    
+    npm run-script package-win
+    
+    mkdir bin
+    
+    mkdir bin/release
+    
+    cd bin/release
+    
+    cmake ../.. -DCMAKE_BUILD_TYPE=Release -G "MinGW Makefiles"
+    
+    mingw32-make
+    
+    cd ../..
+    
+    cp -r dist/MajsoulPaipuCrawler-win32-x64 result
+    
+    cp bin/release/PaipuAnalyzer.exe result/
+    
+    mkdir result/data
+    
+    cp config.json result/
+
+    cp PAADData.json result/
+
+    cp doc/README.txt result/
+    
+    cp doc/release-notes.txt result/
+
+    cp -r i18n/ result/
+
+    mv result MajsoulPaipuAnalyzer-win-x64
+
+    7z a MajsoulPaipuAnalyzer-win-x64.7z MajsoulPaipuAnalyzer-win-x64
+artifacts:
+- path: MajsoulPaipuAnalyzer-win-x64.7z
+  name: MajsoulPaipuAnalyzer-win-x64
