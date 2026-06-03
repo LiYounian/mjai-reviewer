@@ -129,8 +129,8 @@ def _run_fetch(task: FetchTask):
                 try:
                     tenhou = capture.fetch_record(ctx, url, timeout_s=this_timeout)
                     out = tenhou_export.write_tenhou(tenhou, pid)
-                    task.emit("log", f"✅ [{i+1}/{len(plan)}] 落盘: {out.name}")
-                    wrote.append({"pid": pid, "path": str(out.relative_to(PROJECT_ROOT))})
+                    task.emit("log", f"✅ [{i+1}/{len(plan)}] 落盘: {out}")
+                    wrote.append({"pid": pid, "path": str(out)})
                 except Exception as e:
                     task.emit("log", f"❌ [{i+1}/{len(plan)}] 失败: {e}")
                     failed.append({"pid": pid, "error": str(e)})

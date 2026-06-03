@@ -179,11 +179,12 @@
     </div>
 
     <div class="panel" style="padding:16px">
-      <div style="display:flex;align-items:center;margin-bottom:12px">
+      <div style="display:flex;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <h2 style="margin:0;border-left:none;padding-left:0">本地已抓牌谱</h2>
+        <span class="meta-info" id="games-summary"></span>
         <span class="spacer"></span>
         <button id="refresh-games-btn">刷新</button>
-        <button id="analyze-all-btn">全部加入分析</button>
+        <button id="analyze-selected-btn">分析选中 (0)</button>
       </div>
       <div style="overflow-x:auto"><table class="games-list" id="games-list"></table></div>
     </div>
@@ -603,28 +604,63 @@
     }
   }
 
+  // 缓存最近一次的牌谱列表，用来读勾选状态
+  let _GAMES_CACHE = [];
+
   function renderGamesList(games) {
+    _GAMES_CACHE = games;
     const tbl = document.getElementById("games-list");
+    const summary = document.getElementById("games-summary");
     if (!games.length) {
       tbl.innerHTML = `<tbody><tr><td class="dim">暂无已抓牌谱</td></tr></tbody>`;
+      summary.textContent = "";
+      updateAnalyzeBtn();
       return;
     }
     const fmtDate = (ts) => new Date(ts * 1000).toLocaleString();
     const fmtSize = (b) => b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`;
-    const head = `<thead><tr><th style="text-align:left">牌谱 ID</th><th>大小</th><th>抓取时间</th><th></th></tr></thead>`;
-    const body = "<tbody>" + games.map(g => `
+    summary.textContent = `共 ${games.length} 局`;
+
+    const head = `<thead><tr>
+      <th style="text-align:left;width:30px"><input type="checkbox" id="games-select-all" checked title="全选/反选"></th>
+      <th style="text-align:left">牌谱 ID</th>
+      <th>大小</th>
+      <th>抓取时间</th>
+      <th></th>
+    </tr></thead>`;
+    const body = "<tbody>" + games.map(g => {
+      const refEsc = escapeHTML(g.ref);
+      // 雀魂分享链接里 paipu 参数是不带 _seat 后缀的格式吗? 实际雀魂"分享"按钮就是 paipu=<full_ref>
+      const majsoulUrl = `https://game.maj-soul.com/1/?paipu=${encodeURIComponent(g.ref)}`;
+      return `
       <tr>
-        <td style="text-align:left;font-family:ui-monospace,Menlo,monospace">${escapeHTML(g.ref)}</td>
+        <td><input type="checkbox" class="game-cb" data-ref="${refEsc}" checked></td>
+        <td style="text-align:left;font-family:ui-monospace,Menlo,monospace;font-size:11.5px">${refEsc}</td>
         <td>${fmtSize(g.size)}</td>
         <td>${fmtDate(g.mtime)}</td>
         <td class="actions">
-          <button data-act="analyze" data-ref="${escapeHTML(g.ref)}">分析此局</button>
-          <button data-act="delete" data-ref="${escapeHTML(g.ref)}">删除</button>
+          <a href="${majsoulUrl}" target="_blank" rel="noopener" title="到雀魂网页看原始牌谱">🔗 雀魂</a>
+          <button data-act="delete" data-ref="${refEsc}">删除</button>
         </td>
-      </tr>
-    `).join("") + "</tbody>";
+      </tr>`;
+    }).join("") + "</tbody>";
     tbl.innerHTML = head + body;
 
+    // 全选/反选
+    tbl.querySelector("#games-select-all").addEventListener("change", (e) => {
+      tbl.querySelectorAll(".game-cb").forEach(cb => { cb.checked = e.target.checked; });
+      updateAnalyzeBtn();
+    });
+    // 单行勾选
+    tbl.querySelectorAll(".game-cb").forEach(cb => cb.addEventListener("change", () => {
+      const all = tbl.querySelectorAll(".game-cb");
+      const checked = tbl.querySelectorAll(".game-cb:checked");
+      tbl.querySelector("#games-select-all").checked = (all.length === checked.length);
+      tbl.querySelector("#games-select-all").indeterminate = (checked.length > 0 && checked.length < all.length);
+      updateAnalyzeBtn();
+    }));
+
+    // 删除
     tbl.onclick = async (e) => {
       const btn = e.target.closest("button[data-act]");
       if (!btn) return;
@@ -633,29 +669,34 @@
         if (!confirm(`删除 ${ref} ?`)) return;
         try { await api(`/api/games/${encodeURIComponent(ref)}`, { method: "DELETE" }); refreshGamesList(); }
         catch (err) { alert(err.message); }
-      } else if (btn.dataset.act === "analyze") {
-        try {
-          const src = await api(`/api/games/raw?ref=${encodeURIComponent(ref)}`);
-          DATA = buildReport([parseGame(src)]);
-          onLoaded(`${ref}（server 加载）`);
-          switchTab("stats");
-        } catch (err) {
-          alert("分析失败: " + err.message);
-        }
       }
     };
+
+    updateAnalyzeBtn();
+  }
+
+  function selectedRefs() {
+    return Array.from(document.querySelectorAll("#games-list .game-cb:checked")).map(cb => cb.dataset.ref);
+  }
+
+  function updateAnalyzeBtn() {
+    const btn = document.getElementById("analyze-selected-btn");
+    if (!btn) return;
+    const n = selectedRefs().length;
+    btn.textContent = `分析选中 (${n})`;
+    btn.disabled = n === 0;
   }
 
   document.getElementById("refresh-games-btn")?.addEventListener("click", refreshGamesList);
 
-  document.getElementById("analyze-all-btn")?.addEventListener("click", async () => {
+  document.getElementById("analyze-selected-btn")?.addEventListener("click", async () => {
     if (!HAS_SERVER) return;
+    const refs = selectedRefs();
+    if (!refs.length) { alert("没有勾选任何牌谱"); return; }
     try {
-      const { games } = await api("/api/games");
-      if (!games.length) { alert("没有牌谱"); return; }
-      const srcs = await Promise.all(games.map(g => api(`/api/games/raw?ref=${encodeURIComponent(g.ref)}`)));
+      const srcs = await Promise.all(refs.map(ref => api(`/api/games/raw?ref=${encodeURIComponent(ref)}`)));
       DATA = buildReport(srcs.map(parseGame));
-      onLoaded(`本地 ${games.length} 场（server 加载）`);
+      onLoaded(`选中 ${refs.length} 场（server 加载）`);
       switchTab("stats");
     } catch (e) { alert(e.message); }
   });
