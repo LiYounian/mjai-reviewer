@@ -28,8 +28,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-GAMES_DIR = PROJECT_ROOT / "data" / "games"
+from src.config import (
+    PROJECT_ROOT, get_data_dir, get_games_dir, get_raw_dir,
+    set_data_dir, ensure_dirs, load_config,
+)
+
 VIEWER_HTML = PROJECT_ROOT / "viewer.html"
 
 # 全局抓取任务状态。任何时刻只有 0 或 1 个 fetch 任务。
@@ -95,7 +98,7 @@ def _run_fetch(task: FetchTask):
                 task.emit("log", f"❌ 链接无法识别: {raw} ({e})")
                 continue
             url = tenhou_export.url_for(pid)
-            out_path = tenhou_export.DEFAULT_OUTDIR / f"{tenhou_export.safe_filename(pid)}.json"
+            out_path = get_games_dir() / f"{tenhou_export.safe_filename(pid)}.json"
             if out_path.exists() and not task.force:
                 task.emit("log", f"⏭ 跳过 {pid}（已抓过，要重抓请勾'强制重抓'）")
                 continue
@@ -270,6 +273,15 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if p == "/api/config":
+            self._send_json(200, {
+                "data_dir": str(get_data_dir()),
+                "games_dir": str(get_games_dir()),
+                "raw_dir": str(get_raw_dir()),
+                "raw": load_config(),  # 原始 config 内容（可能为空）
+            })
+            return
+
         self.send_error(404)
 
     def do_POST(self):
@@ -282,6 +294,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if p == "/api/fetch":
             self._handle_fetch_start()
+            return
+        if p == "/api/config":
+            self._handle_set_config()
             return
         self.send_error(404)
 
@@ -302,11 +317,11 @@ class Handler(BaseHTTPRequestHandler):
             return False
 
     def _handle_list_games(self):
-        if not GAMES_DIR.exists():
+        if not get_games_dir().exists():
             self._send_json(200, {"games": []})
             return
         items = []
-        for f in sorted(GAMES_DIR.glob("*.json")):
+        for f in sorted(get_games_dir().glob("*.json")):
             try:
                 st = f.stat()
                 items.append({
@@ -322,7 +337,7 @@ class Handler(BaseHTTPRequestHandler):
         if not ref or "/" in ref or ".." in ref:
             self.send_error(400)
             return
-        path = GAMES_DIR / f"{ref}.json"
+        path = get_games_dir() / f"{ref}.json"
         if not path.exists():
             self.send_error(404)
             return
@@ -332,7 +347,7 @@ class Handler(BaseHTTPRequestHandler):
         if not ref or "/" in ref or ".." in ref:
             self.send_error(400)
             return
-        path = GAMES_DIR / f"{ref}.json"
+        path = get_games_dir() / f"{ref}.json"
         if not path.exists():
             self.send_error(404)
             return
@@ -341,6 +356,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"deleted": ref})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
+
+    def _handle_set_config(self):
+        body = self._read_body_json()
+        new_dir = (body.get("data_dir") or "").strip()
+        if not new_dir:
+            self._send_json(400, {"error": "data_dir 必填"})
+            return
+        try:
+            resolved = set_data_dir(new_dir)
+            self._send_json(200, {
+                "ok": True,
+                "data_dir": str(resolved),
+                "games_dir": str(get_games_dir()),
+                "raw_dir": str(get_raw_dir()),
+            })
+        except Exception as e:
+            self._send_json(500, {"error": f"无法设置 data_dir: {e}"})
 
     def _handle_login_start(self):
         global _LOGIN_THREAD
@@ -459,6 +491,9 @@ def main():
     if not VIEWER_HTML.exists():
         print(f"❌ 找不到 {VIEWER_HTML}", file=sys.stderr)
         sys.exit(1)
+
+    ensure_dirs()
+    print(f"📂 数据目录: {get_data_dir()}")
 
     addr = ("127.0.0.1", args.port)
     httpd = ThreadingHTTPServer(addr, Handler)

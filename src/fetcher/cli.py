@@ -93,10 +93,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     # 预解析 + 跳过已有
+    from src.config import get_games_dir
+    games_dir = get_games_dir()
     plan: list[tuple[str, str]] = []  # (url, paipu_id)
     for url in args.urls:
         pid = tenhou_export.parse_paipu_id(url)
-        out_path = tenhou_export.DEFAULT_OUTDIR / f"{tenhou_export.safe_filename(pid)}.json"
+        out_path = games_dir / f"{tenhou_export.safe_filename(pid)}.json"
         if out_path.exists() and not args.force:
             print(f"[fetch] skip {pid}: 已存在 {out_path}（用 --force 覆盖）", flush=True)
             continue

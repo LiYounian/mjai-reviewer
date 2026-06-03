@@ -154,6 +154,12 @@
       <h2 style="margin-top:0;border-left:none;padding-left:0">从雀魂链接抓取</h2>
 
       <div class="form-row" style="margin-bottom:10px">
+        <label>💾 保存位置</label>
+        <code id="data-dir-display" style="background:#0d1117;padding:3px 8px;border-radius:3px;font-size:12px">…</code>
+        <button id="data-dir-edit-btn">改…</button>
+      </div>
+
+      <div class="form-row" style="margin-bottom:10px">
         <button id="login-btn">登录雀魂</button>
         <span class="login-status" id="login-status">检测中…</span>
       </div>
@@ -591,8 +597,43 @@
     } catch (e) {
       document.getElementById("login-status").textContent = "无法连接 server";
     }
+    refreshDataDirDisplay();
     refreshGamesList();
   }
+
+  async function refreshDataDirDisplay() {
+    if (!HAS_SERVER) return;
+    try {
+      const cfg = await api("/api/config");
+      document.getElementById("data-dir-display").textContent = cfg.data_dir;
+      document.getElementById("data-dir-display").title =
+        `天凤格式: ${cfg.games_dir}\n雀魂原始: ${cfg.raw_dir}`;
+    } catch (e) {
+      document.getElementById("data-dir-display").textContent = "(无法读取)";
+    }
+  }
+
+  document.getElementById("data-dir-edit-btn")?.addEventListener("click", async () => {
+    if (!HAS_SERVER) return;
+    const cur = document.getElementById("data-dir-display").textContent;
+    const next = prompt(
+      "新的保存位置（绝对路径，~ 会自动展开）:\n\n" +
+      "下面会自动建 games/ 和 raw/ 子目录。",
+      cur,
+    );
+    if (!next || next.trim() === "" || next.trim() === cur) return;
+    try {
+      const r = await api("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data_dir: next.trim() }),
+      });
+      alert(`保存位置已更新为:\n${r.data_dir}`);
+      refreshFetchTab();
+    } catch (e) {
+      alert("保存失败: " + e.message);
+    }
+  });
 
   async function refreshGamesList() {
     if (!HAS_SERVER) return;

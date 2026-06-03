@@ -10,11 +10,10 @@ import stat
 
 from playwright.sync_api import sync_playwright, BrowserContext
 
-# 项目根 = src/fetcher/browser.py 上溯三层
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+from src.config import get_profile_dir, PROJECT_ROOT as _PROJECT_ROOT
+
 # inject.js 由 inject/ 子项目 esbuild 构建产生
 INJECT_JS = _PROJECT_ROOT / "inject" / "dist" / "inject.js"
-DEFAULT_PROFILE = _PROJECT_ROOT / "data" / "profile"
 
 
 def _profile_has_login(profile_dir: Path) -> bool:
@@ -30,10 +29,12 @@ def _ensure_profile_perms(profile_dir: Path) -> None:
 
 @contextmanager
 def open_context(
-    profile_dir: Path = DEFAULT_PROFILE,
+    profile_dir: Path | None = None,
     headless: bool | None = None,
     inject_path: Path = INJECT_JS,
 ):
+    if profile_dir is None:
+        profile_dir = get_profile_dir()
     """开一个持久化 Chromium，注入 inject.js 到所有页面的 document_start。
 
     headless=None 时按 profile 是否有登录态自动选：未登录→headed（让用户扫码）；已登录→headless。
@@ -62,5 +63,5 @@ def open_context(
             ctx.close()
 
 
-def is_logged_in(profile_dir: Path = DEFAULT_PROFILE) -> bool:
-    return _profile_has_login(profile_dir)
+def is_logged_in(profile_dir: Path | None = None) -> bool:
+    return _profile_has_login(profile_dir or get_profile_dir())
