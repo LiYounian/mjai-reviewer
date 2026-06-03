@@ -5,7 +5,8 @@
 ## 它能做什么
 
 1. **抓取**：给一条雀魂分享链接，自动从浏览器拉出**天凤格式 json**（4 玩家、整局牌谱、点数等）
-2. **统计**：把抓到的若干局喂给 `stats.py`，按玩家累积出顺位分布、和了率、放铳率、立直率、副露率、平均打点等指标
+2. **统计**：把抓到的若干局喂给 `stats.py`，按玩家累积出顺位、和了率、放铳率、立直率、副露率、平均打点、立直收支、亲和率、连庄数、打点分布等指标
+3. **报告**：用 `report.py` 把若干场牌谱聚合成事实粒度 JSON，浏览器打开 `viewer.html` 看板查阅。支持牌谱/玩家筛选、次数↔比例切换、表头点击排序、番型表多种排序
 
 不做：单局逐手 AI 复盘（那是 mjai-reviewer / NAGA 的事，可以拿本工具产出的 json 直接喂它们）。
 
@@ -19,10 +20,14 @@ Playwright 控制 Chromium → 注入 inject.js（vendored 解码内核）
      → hook WebSocket → 截 fetchGameRecord 帧 → 调 decoder
      │
      ▼
-data/games/<paipu_id>.json   （天凤格式）
+data/games/<paipu_id>.json    （天凤格式，下游 mjai-reviewer/NAGA 也吃这个）
      │
-     ▼   stats.py
-按玩家聚合指标 → 终端输出
+     ├─→  stats.py                          → 终端 markdown 输出（玩家级聚合）
+     │
+     └─→  report.py  →  report.json         事实粒度 JSON（每场/每局/每和/每役）
+                              │
+                              ▼   双击打开 viewer.html，文件选择器加载
+                       浏览器看板（前端实时聚合，可任意切筛选/模式）
 ```
 
 ## 目录结构
@@ -41,9 +46,15 @@ data/games/<paipu_id>.json   （天凤格式）
 │   │   ├── capture.py       抓 fetchGameRecord WS 帧 + 调 inject 解码
 │   │   ├── tenhou_export.py 写文件
 │   │   └── cli.py           参数解析 + 调度
-│   └── parser/              天凤 json 解析（无外向网络）
-│       ├── tenhou.py        json → 结构化对局对象
-│       └── tiles.py         牌面编码 ↔ 可读
+│   ├── parser/              天凤 json 解析（无外向网络）
+│   │   ├── tenhou.py        json → 结构化对局对象
+│   │   ├── tiles.py         牌面编码 ↔ 可读
+│   │   └── localize.py      日文役名/段位/打点 → 简体（仅给统计/报告用）
+│   └── reporter/
+│       └── datafile.py      parsed games → viewer 用的事实粒度 JSON
+│
+├── viewer.html              浏览器看板（无依赖，文件选择器读 report.json）
+├── report.py                生成 report.json
 │
 ├── inject/                  注入到雀魂页的解码器（TS + esbuild）
 │   ├── src/entry.ts         唯一自写的 JS：把解码 API 暴露到 window.__majDecoder
@@ -115,7 +126,7 @@ python3 fetch.py --headed "<url>"
 python3 fetch.py --force "<url>"
 ```
 
-### 出统计
+### 出统计（终端）
 
 ```bash
 # 单局
@@ -125,7 +136,24 @@ python3 stats.py data/games/<paipu>.json
 python3 stats.py data/games/*.json
 ```
 
-按玩家分组，输出顺位 / 和了率 / 放铳率 / 立直率 / 副露率 / 平均打点等。
+按玩家分组，输出顺位 / 和了率 / 放铳率 / 立直率 / 副露率 / 平均打点 / 立直收支 / 连庄数 / 大点分布等。日文役名/段位会归化为简体显示（落盘 json 仍保留日文，喂给下游 mjai-reviewer / NAGA 的）。
+
+### 出报告（浏览器看板）
+
+```bash
+python3 report.py data/games/*.json              # 输出 ./report.json
+python3 report.py data/games/*.json -o my.json   # 自定输出路径
+```
+
+然后在浏览器双击打开 `viewer.html`（或 `open viewer.html`），用文件选择器加载刚生成的 JSON。看板提供：
+
+- **牌谱下拉**：全部 / 单场（一场牌谱 = 东风/半庄全场）
+- **玩家下拉**：全部 / 单人
+- **次数 ↔ 比例**：一键切换；比例模式下排序键也跟着切换
+- **总览表**（26 列）：表头点击排序，活动列加 ↑/↓ 标记
+- **番型表**（行=役、列=玩家）：三种排序——出现先后 / 占比最大 / 役名字典序
+
+viewer 是纯前端单文件、无外部依赖（包括离线无 CDN 也能用）。换数据文件、切筛选都不用回 Python。
 
 ## 风险与边界
 
