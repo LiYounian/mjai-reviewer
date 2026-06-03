@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>牌谱统计 viewer</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2128;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --good: #3fb950;
+    --bad: #f85149;
+    --border: #30363d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px 20px 60px; }
+  h1 { margin: 0 0 6px; font-size: 20px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  h2 { margin: 28px 0 10px; font-size: 15px; border-left: 3px solid var(--accent); padding-left: 10px; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 12px 14px; margin-bottom: 14px;
+  }
+  .toolbar label { color: var(--muted); font-size: 12px; }
+  select, button, input[type="file"]::file-selector-button {
+    background: #0d1117; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 5px 10px; font: inherit; cursor: pointer;
+  }
+  select { min-width: 160px; }
+  button:hover, select:hover { border-color: var(--accent); }
+  button.toggle { background: rgba(88,166,255,0.15); border-color: var(--accent); color: var(--accent); }
+  .spacer { flex: 1; }
+  .meta-info { color: var(--muted); font-size: 12px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { padding: 7px 9px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; background: var(--panel); position: sticky; top: 0; z-index: 1; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--fg); }
+  th.sortable.active { color: var(--accent); }
+  th.sortable .arrow { display: inline-block; width: 10px; opacity: 0.5; margin-left: 2px; }
+  th.sortable.active .arrow { opacity: 1; }
+  td:first-child, th:first-child { text-align: left; position: sticky; left: 0; background: var(--panel); }
+  tr:hover td { background: rgba(88, 166, 255, 0.05); }
+  tr:hover td:first-child { background: var(--panel); }
+  .pos { color: var(--good); }
+  .neg { color: var(--bad); }
+  .dim { color: var(--muted); }
+  .empty { color: var(--muted); padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>牌谱统计 viewer</h1>
+  <div class="sub">读取 <code>report.py</code> 生成的 <code>report.json</code>。所有筛选与切换均在前端聚合，可反复换条件。</div>
+
+  <div class="toolbar">
+    <label>数据文件</label>
+    <input type="file" id="file" accept=".json,application/json">
+    <span class="meta-info" id="loaded">未加载</span>
+  </div>
+
+  <div class="toolbar" id="filters" style="display:none">
+    <label>牌谱</label>
+    <select id="game-sel"><option value="__all__">全部</option></select>
+    <label>玩家</label>
+    <select id="player-sel"><option value="__all__">全部</option></select>
+    <label>显示</label>
+    <button id="mode-btn" class="toggle">次数</button>
+    <span class="spacer"></span>
+    <span class="meta-info" id="scope"></span>
+  </div>
+
+  <div id="content" style="display:none">
+    <h2>总览</h2>
+    <div class="panel"><table id="overview"></table></div>
+
+    <h2>番型 <span class="meta-info" style="font-weight:400;font-size:12px">
+      排序
+      <select id="yaku-sort" style="margin-left:6px">
+        <option value="appearance">出现先后</option>
+        <option value="ratio">占比最大</option>
+        <option value="name">役名字典序</option>
+      </select>
+    </span></h2>
+    <div class="panel"><table id="yaku"></table></div>
+  </div>
+
+  <div id="placeholder" class="empty">先选择 report.json 文件</div>
+</div>
+
+<script>
+(function () {
+  let DATA = null;
+  let MODE = "count"; // "count" | "ratio"
+  let OVERVIEW_SORT = { col: "avg_place", dir: "asc" }; // 默认按均顺升序
+
+  const $ = (id) => document.getElementById(id);
+  const fmtPct = (x) => (x == null || isNaN(x) ? "-" : (x * 100).toFixed(1) + "%");
+  const fmtNum = (x, d = 0) => (x == null || isNaN(x) ? "-" : Number(x).toFixed(d));
+  const sign = (x) => (x > 0 ? "pos" : x < 0 ? "neg" : "");
+  const signed = (x, d = 1) => (x == null ? "-" : (x > 0 ? "+" : "") + Number(x).toFixed(d));
+
+  // ===== 文件加载 =====
+  $("file").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        DATA = JSON.parse(r.result);
+        if (!DATA.schema || !DATA.schema.startsWith("mjai-reviewer/stats/")) {
+          alert("文件 schema 不识别: " + DATA.schema);
+          return;
+        }
+        onLoaded(f.name);
+      } catch (err) {
+        alert("解析失败: " + err.message);
+      }
+    };
+    r.readAsText(f);
+  });
+
+  function onLoaded(filename) {
+    $("loaded").textContent = `${filename} · ${DATA.games.length} 场牌谱 · 生成于 ${DATA.generated_at || "-"}`;
+    $("placeholder").style.display = "none";
+    $("filters").style.display = "";
+    $("content").style.display = "";
+
+    // 牌谱下拉
+    const gameSel = $("game-sel");
+    gameSel.innerHTML = '<option value="__all__">全部 (' + DATA.games.length + " 场)</option>";
+    DATA.games.forEach((g, i) => {
+      const o = document.createElement("option");
+      o.value = String(i);
+      o.textContent = `${g.label}  ${g.rule_disp || ""}  [${g.names.filter(Boolean).join(", ")}]`;
+      gameSel.appendChild(o);
+    });
+
+    // 玩家下拉(去重所有出现过的玩家名)
+    const allNames = new Set();
+    DATA.games.forEach((g) => g.names.forEach((n) => n && allNames.add(n)));
+    const playerSel = $("player-sel");
+    playerSel.innerHTML = '<option value="__all__">全部</option>';
+    Array.from(allNames).sort().forEach((n) => {
+      const o = document.createElement("option");
+      o.value = n;
+      o.textContent = n;
+      playerSel.appendChild(o);
+    });
+
+    gameSel.addEventListener("change", refresh);
+    playerSel.addEventListener("change", refresh);
+    $("yaku-sort").addEventListener("change", refresh);
+    $("mode-btn").addEventListener("click", () => {
+      MODE = MODE === "count" ? "ratio" : "count";
+      $("mode-btn").textContent = MODE === "count" ? "次数" : "比例";
+      refresh();
+    });
+
+    refresh();
+  }
+
+  // ===== 筛选 =====
+  function selectedGames() {
+    const v = $("game-sel").value;
+    return v === "__all__" ? DATA.games : [DATA.games[Number(v)]];
+  }
+  function selectedPlayer() {
+    const v = $("player-sel").value;
+    return v === "__all__" ? null : v;
+  }
+
+  // ===== 聚合 =====
+  // 给定 games + 可选 playerFilter, 返回 {玩家名 -> 指标}
+  function aggregate(games, playerFilter) {
+    const stats = {};
+    const get = (n) => {
+      if (!stats[n]) stats[n] = blank(n);
+      return stats[n];
+    };
+
+    games.forEach((g) => {
+      const place_of = {};
+      g.final.forEach((f) => (place_of[f.seat] = f.placement));
+      // 全场顺位/收支(只有筛"全部牌谱"才计入对局数;筛单场也只有 1 场)
+      g.final.forEach((f) => {
+        if (playerFilter && f.name !== playerFilter) return;
+        const ps = get(f.name);
+        ps.games += 1;
+        ps.placements[f.placement - 1] += 1;
+        ps.score_balance += f.score_delta;
+      });
+
+      g.rounds.forEach((r) => {
+        // 玩家粒度统计
+        r.players.forEach((p) => {
+          if (playerFilter && p.name !== playerFilter) return;
+          const ps = get(p.name);
+          ps.rounds += 1;
+          if (p.is_dealer) ps.dealer_rounds += 1;
+          if (p.riichi) {
+            ps.reach += 1;
+            ps.reach_balance += p.delta;
+            const o = p.riichi_outcome;
+            if (o === "won") ps.reach_won += 1;
+            else if (o === "dealin") ps.reach_dealin += 1;
+            else if (o === "draw_tenpai") ps.reach_draw_tenpai += 1;
+            else if (o === "draw_noten") ps.reach_draw_noten += 1;
+            else ps.reach_other += 1;
+          }
+          if (p.fulu_count > 0) ps.fulu += 1;
+        });
+
+        // 和了(从 agari 角度)
+        if (r.ending_type === "和了") {
+          r.agaris.forEach((a) => {
+            const winner = a.who_name;
+            // 和了归属者
+            if (!playerFilter || winner === playerFilter) {
+              if (winner) {
+                const ps = get(winner);
+                ps.hule += 1;
+                ps.hule_point += a.point_won;
+                ps.han_total += a.han;
+                if (a.tsumo) ps.zimo += 1;
+                if (a.score_class) ps.score_class[a.score_class] = (ps.score_class[a.score_class] || 0) + 1;
+                // 是否亲和
+                const wp = r.players.find((p) => p.name === winner);
+                if (wp && wp.is_dealer) ps.dealer_hule += 1;
+                if (wp && wp.fulu_count > 0) ps.fulu_hule += 1;
+              }
+            }
+            // 放铳者
+            if (!a.tsumo && a.from_name) {
+              if (!playerFilter || a.from_name === playerFilter) {
+                const fps = get(a.from_name);
+                fps.fangchong += 1;
+                // 失点 = round 里 from 的 delta 负值;但更直接的是 a.delta[from],未存进 viewer json,
+                // 用聚合: 在该和了中 from 的失点 = -a.point_won 不准(供托/本场)。退而求其次用 round.players 的 delta累加.
+                // 这里我们简单以"放铳次数"为主指标,失点用整局 from 的 delta 近似(下方在 ronComplete 里补)
+              }
+            }
+            // 自摸时其他人被自摸
+            if (a.tsumo) {
+              r.players.forEach((p) => {
+                if (p.name === winner) return;
+                if (playerFilter && p.name !== playerFilter) return;
+                const bps = get(p.name);
+                bps.beizimo += 1;
+              });
+            }
+          });
+
+          // 用整局 player.delta 累加放铳/被自摸失点(更准)
+          r.players.forEach((p) => {
+            if (playerFilter && p.name !== playerFilter) return;
+            const ps = get(p.name);
+            // 这里粗略: 玩家本局 delta < 0 视为失点；区分放铳/被自摸需要看 agari
+            // 是放铳者：找一条 agari 的 from_name == p.name
+            const ronAt = r.agaris.find((a) => !a.tsumo && a.from_name === p.name);
+            if (ronAt && p.delta < 0) {
+              ps.fangchong_point += -p.delta;
+              if (p.fulu_count > 0) ps.fulu_fangchong += 1; // 副露放铳次数
+            }
+            // 被自摸失点
+            const isTsumoVictim = r.agaris.some((a) => a.tsumo && a.who_name !== p.name);
+            if (isTsumoVictim && p.delta < 0 && !ronAt) {
+              ps.beizimo_point += -p.delta;
+            }
+          });
+        } else if (r.ending_type === "流局") {
+          r.players.forEach((p) => {
+            if (playerFilter && p.name !== playerFilter) return;
+            const ps = get(p.name);
+            ps.liuju += 1;
+            if (p.delta > 0) ps.liuju_tenpai += 1;
+          });
+        }
+      });
+    });
+
+    return stats;
+  }
+
+  function blank(name) {
+    return {
+      name,
+      games: 0,
+      placements: [0, 0, 0, 0],
+      score_balance: 0,
+      rounds: 0,
+      dealer_rounds: 0,
+      hule: 0, zimo: 0, dealer_hule: 0, hule_point: 0, han_total: 0,
+      fangchong: 0, fangchong_point: 0,
+      beizimo: 0, beizimo_point: 0,
+      reach: 0, reach_won: 0, reach_dealin: 0, reach_draw_tenpai: 0,
+      reach_draw_noten: 0, reach_other: 0, reach_balance: 0,
+      fulu: 0, fulu_hule: 0, fulu_fangchong: 0,
+      liuju: 0, liuju_tenpai: 0,
+      score_class: {},
+    };
+  }
+
+  // 番型统计: 行=役名, 列=玩家. cell = {count, ratio}
+  // ratio 分母 = 该玩家总和了数(仅在该筛选范围内)
+  // 同一和了里同名役只算一次出现(宝牌(2飜)+赤宝牌等)
+  // 顺带记下每个役在筛选范围内的"首次出现序号",供出现先后排序用
+  function aggregateYaku(games, playerFilter) {
+    const yakuByPlayer = {};
+    const huleByPlayer = {};
+    const firstSeen = {};
+    let order = 0;
+    games.forEach((g) => {
+      g.rounds.forEach((r) => {
+        if (r.ending_type !== "和了") return;
+        r.agaris.forEach((a) => {
+          const w = a.who_name;
+          if (!w) return;
+          if (playerFilter && w !== playerFilter) return;
+          huleByPlayer[w] = (huleByPlayer[w] || 0) + 1;
+          if (!yakuByPlayer[w]) yakuByPlayer[w] = {};
+          const seen = new Set();
+          a.yaku.forEach((y) => {
+            if (seen.has(y.name)) return;
+            seen.add(y.name);
+            yakuByPlayer[w][y.name] = (yakuByPlayer[w][y.name] || 0) + 1;
+            if (!(y.name in firstSeen)) firstSeen[y.name] = order++;
+          });
+        });
+      });
+    });
+    return { yaku: yakuByPlayer, hule: huleByPlayer, firstSeen };
+  }
+
+  // ===== 渲染 =====
+  // 列定义: 单一来源驱动表头/排序/渲染。
+  // sortVal(p, ratio): 返回排序用数值;
+  // render(p, ratio): 返回 HTML 字符串。
+  // 注意: 比例模式下,带分母的行为列(和了/放铳/...)排序值变成比率,与显示值一致;
+  // 永远是计数的列(对局/局)和永远是均值的列(平均打点/均顺/收支)不受 ratio 影响。
+  const safeR = (a, b) => (b ? a / b : 0);
+  const avgPlaceOf = (p) => (p.games ? p.placements.reduce((s, c, i) => s + c * (i + 1), 0) / p.games : 0);
+
+  const OVERVIEW_COLS = [
+    { id: "name", label: "玩家",
+      sortVal: (p) => p.name,
+      render: (p) => escapeHTML(p.name) },
+    { id: "games", label: "对局",
+      sortVal: (p) => p.games,
+      render: (p) => fmtNum(p.games) },
+    { id: "rounds", label: "局",
+      sortVal: (p) => p.rounds,
+      render: (p) => fmtNum(p.rounds) },
+    { id: "avg_place", label: "均顺",
+      sortVal: (p) => avgPlaceOf(p) || Infinity, // 0 排末尾
+      render: (p) => fmtNum(avgPlaceOf(p), 2) },
+    { id: "balance", label: "收支",
+      sortVal: (p) => p.score_balance,
+      render: (p) => `<span class="${sign(p.score_balance)}">${signed(p.score_balance, 1)}</span>` },
+
+    ...[0, 1, 2, 3].map((i) => ({
+      id: `place${i + 1}`, label: `${i + 1}位`,
+      sortVal: (p, r) => (r ? safeR(p.placements[i], p.games) : p.placements[i]),
+      render: (p, r) => (r ? fmtPct(safeR(p.placements[i], p.games)) : p.placements[i]),
+    })),
+
+    ...[
+      ["hule", "和了", "hule", "rounds"],
+      ["zimo", "自摸(和)", "zimo", "hule"],
+      ["fangchong", "放铳", "fangchong", "rounds"],
+      ["beizimo", "被自摸", "beizimo", "rounds"],
+      ["reach", "立直", "reach", "rounds"],
+      ["fulu", "副露", "fulu", "rounds"],
+      ["liuju", "流局", "liuju", "rounds"],
+      ["liuju_tenpai", "流听", "liuju_tenpai", "liuju"],
+      ["dealer_hule", "亲和", "dealer_hule", "dealer_rounds"],
+      ["reach_won", "立直·和", "reach_won", "reach"],
+      ["reach_dealin", "立直·铳", "reach_dealin", "reach"],
+      ["reach_draw_tenpai", "立直·流听", "reach_draw_tenpai", "reach"],
+      ["reach_draw_noten", "立直·流不听", "reach_draw_noten", "reach"],
+    ].map(([id, label, num, denom]) => ({
+      id, label,
+      sortVal: (p, r) => (r ? safeR(p[num], p[denom]) : p[num]),
+      render: (p, r) => (r ? fmtPct(safeR(p[num], p[denom])) : fmtNum(p[num])),
+    })),
+
+    { id: "avg_hule", label: "平均和了",
+      sortVal: (p) => safeR(p.hule_point, p.hule),
+      render: (p) => fmtNum(safeR(p.hule_point, p.hule)) },
+    { id: "avg_fangchong", label: "平均放铳",
+      sortVal: (p) => safeR(p.fangchong_point, p.fangchong),
+      render: (p) => fmtNum(safeR(p.fangchong_point, p.fangchong)) },
+    { id: "avg_beizimo", label: "平均被自摸",
+      sortVal: (p) => safeR(p.beizimo_point, p.beizimo),
+      render: (p) => fmtNum(safeR(p.beizimo_point, p.beizimo)) },
+    { id: "reach_avg_balance", label: "立直均收",
+      sortVal: (p) => (p.reach ? p.reach_balance / p.reach : 0),
+      render: (p) => {
+        const v = p.reach ? p.reach_balance / p.reach : null;
+        return v == null ? "-" : `<span class="${sign(v)}">${signed(v, 0)}</span>`;
+      } },
+  ];
+
+  function renderOverview(stats) {
+    const players = Object.values(stats);
+    if (!players.length) {
+      $("overview").innerHTML = '<tbody><tr><td class="dim">无数据</td></tr></tbody>';
+      return;
+    }
+    const ratio = MODE === "ratio";
+    const sortCol = OVERVIEW_COLS.find((c) => c.id === OVERVIEW_SORT.col) || OVERVIEW_COLS[3];
+    const dir = OVERVIEW_SORT.dir === "desc" ? -1 : 1;
+    players.sort((a, b) => {
+      const va = sortCol.sortVal(a, ratio);
+      const vb = sortCol.sortVal(b, ratio);
+      if (typeof va === "string" || typeof vb === "string") {
+        return String(va).localeCompare(String(vb), "zh") * dir;
+      }
+      return ((va || 0) - (vb || 0)) * dir;
+    });
+
+    const arrow = (id) => {
+      if (id !== OVERVIEW_SORT.col) return '<span class="arrow">↕</span>';
+      return `<span class="arrow">${OVERVIEW_SORT.dir === "desc" ? "↓" : "↑"}</span>`;
+    };
+    const head = "<thead><tr>" + OVERVIEW_COLS.map((c) =>
+      `<th class="sortable${c.id === OVERVIEW_SORT.col ? " active" : ""}" data-col="${c.id}">${c.label}${arrow(c.id)}</th>`
+    ).join("") + "</tr></thead>";
+
+    const body = "<tbody>" + players.map((p) =>
+      "<tr>" + OVERVIEW_COLS.map((c) => `<td>${c.render(p, ratio)}</td>`).join("") + "</tr>"
+    ).join("") + "</tbody>";
+
+    const tbl = $("overview");
+    tbl.innerHTML = head + body;
+    // 委托一次性绑定
+    tbl.querySelector("thead").addEventListener("click", (e) => {
+      const th = e.target.closest("th.sortable");
+      if (!th) return;
+      const id = th.dataset.col;
+      if (OVERVIEW_SORT.col === id) {
+        OVERVIEW_SORT.dir = OVERVIEW_SORT.dir === "desc" ? "asc" : "desc";
+      } else {
+        OVERVIEW_SORT.col = id;
+        // 数值列默认降序、字符串列默认升序
+        const col = OVERVIEW_COLS.find((c) => c.id === id);
+        const sample = col.sortVal(players[0], ratio);
+        OVERVIEW_SORT.dir = typeof sample === "string" ? "asc" : "desc";
+      }
+      refresh();
+    });
+  }
+
+  function renderYaku(yakuAgg) {
+    const { yaku, hule, firstSeen } = yakuAgg;
+    const players = Object.keys(yaku).sort();
+    if (!players.length) {
+      $("yaku").innerHTML = '<tbody><tr><td class="dim">无和了数据</td></tr></tbody>';
+      return;
+    }
+    const allYaku = new Set();
+    players.forEach((p) => Object.keys(yaku[p]).forEach((y) => allYaku.add(y)));
+
+    const sortMode = $("yaku-sort").value;
+    const maxRatio = (y) => {
+      let m = 0;
+      players.forEach((p) => {
+        const h = hule[p] || 0;
+        if (h) m = Math.max(m, (yaku[p][y] || 0) / h);
+      });
+      return m;
+    };
+    const cmp = {
+      // 默认：按筛选范围内第一次出现的顺序
+      appearance: (a, b) => (firstSeen[a] ?? 0) - (firstSeen[b] ?? 0),
+      // 各玩家中最高占比降序，并列再按字典序
+      ratio: (a, b) => (maxRatio(b) - maxRatio(a)) || a.localeCompare(b, "zh"),
+      // 役名字典序(中文按拼音/笔画走 localeCompare 的 zh collation)
+      name: (a, b) => a.localeCompare(b, "zh"),
+    }[sortMode] || ((a, b) => 0);
+
+    const yakuList = Array.from(allYaku).sort(cmp);
+
+    const ratio = MODE === "ratio";
+    const headerCells = ["役"].concat(players.map((p) => `${escapeHTML(p)}<div class="dim" style="font-weight:400">${hule[p]||0} 和</div>`));
+    const rows = yakuList.map((y) => {
+      const cells = [`<td>${escapeHTML(y)}</td>`];
+      players.forEach((p) => {
+        const c = yaku[p][y] || 0;
+        const h = hule[p] || 0;
+        if (c === 0) {
+          cells.push('<td class="dim">·</td>');
+        } else if (ratio) {
+          cells.push(`<td>${fmtPct(c / h)}<span class="dim"> (${c})</span></td>`);
+        } else {
+          cells.push(`<td>${c}</td>`);
+        }
+      });
+      return cells.join("");
+    });
+
+    $("yaku").innerHTML =
+      "<thead><tr>" + headerCells.map((h) => `<th>${h}</th>`).join("") + "</tr></thead>" +
+      "<tbody>" + rows.map((r) => `<tr>${r}</tr>`).join("") + "</tbody>";
+  }
+
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function refresh() {
+    const games = selectedGames();
+    const player = selectedPlayer();
+    const totalRounds = games.reduce((a, g) => a + g.rounds.length, 0);
+    $("scope").textContent = `范围: ${games.length} 场 · ${totalRounds} 局${player ? " · 仅 " + player : ""}`;
+    renderOverview(aggregate(games, player));
+    renderYaku(aggregateYaku(games, player));
+  }
+})();
+</script>
+</body>
+</html>
