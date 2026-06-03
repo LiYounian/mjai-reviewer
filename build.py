@@ -42,7 +42,46 @@ def step_inject():
     inject_dir = ROOT / "inject"
     if not (inject_dir / "node_modules").exists():
         run([NPM, "install"], cwd=inject_dir)
+
+    # vendored/kbkn3/ 里的 protobufjs 用 require('./src/...') 找包内子模块,
+    # 必须能 resolve 到 inject/node_modules。仓库里用 git symlink (120000 mode)
+    # 指向 ../../inject/node_modules; checkout 后大概率是死链 (Win 默认根本不展开
+    # symlink, 把链接目标当文本) 或软链尚未建好。每次 build 都重建，幂等且跨平台。
+    _ensure_kbkn3_node_modules()
+
     run([NPM, "run", "build"], cwd=inject_dir)
+
+
+def _ensure_kbkn3_node_modules():
+    """让 vendored/kbkn3/node_modules 指向 inject/node_modules。
+
+    平台行为:
+      - mac/linux: 重建符号链接（指向 ../../inject/node_modules）
+      - Windows: 也用 dir junction（os.symlink target_is_directory=True）；
+        若没权限就 fallback 复制（最坏 100MB 拷贝，但 CI 上不在乎）。
+    """
+    target_rel = Path("..") / ".." / "inject" / "node_modules"
+    link_path = ROOT / "vendored" / "kbkn3" / "node_modules"
+
+    if not (ROOT / "inject" / "node_modules").exists():
+        raise SystemError("inject/node_modules 不存在，npm install 应该先跑")
+
+    # 删除旧的 symlink/文件/目录
+    if link_path.is_symlink() or link_path.exists():
+        if link_path.is_dir() and not link_path.is_symlink():
+            shutil.rmtree(link_path)
+        else:
+            link_path.unlink()
+
+    try:
+        os.symlink(target_rel, link_path, target_is_directory=True)
+        print(f"   🔗 符号链接 {link_path} -> {target_rel}")
+        return
+    except (OSError, NotImplementedError) as e:
+        # Windows 没开 Developer Mode 时普通用户不能建 symlink
+        print(f"   ⚠️  symlink 失败 ({e}), 退回复制")
+        shutil.copytree(ROOT / "inject" / "node_modules", link_path)
+        print(f"   📋 已复制 node_modules 到 {link_path}")
 
 
 def step_playwright():
@@ -68,22 +107,34 @@ def step_pyinstaller():
         if p.exists():
             shutil.rmtree(p)
 
-    run([sys.executable, "-m", "PyInstaller", "--noconfirm", "mjai-tool.spec"])
-
-    # PyInstaller 跳过了 chromium .app（spec 显式排除）。手动整目录复制进去，
-    # 不让 PyInstaller 去重签里面的 mach-O — 那会破坏 .app bundle 结构。
-    print("   📁 复制 chromium 到产物（绕过 PyInstaller 签名步骤）")
+    # 临时把 chromium 从 site-packages 挪走 — PyInstaller 扫描时根本看不到，
+    # 就不会把里面的 mach-O 二进制收成 binaries 然后 ad-hoc 重签 (会破坏 .app bundle)。
+    # 跑完 PyInstaller 后再搬回原位 + 整目录 copy 到产物。
     import playwright as _pw
     src_browsers = Path(_pw.__file__).parent / "driver" / "package" / ".local-browsers"
-    dst_browsers = ROOT / "dist" / "mjai-tool" / "_internal" / "playwright" / "driver" / "package" / ".local-browsers"
     if not src_browsers.exists():
-        raise SystemError(f"找不到源 chromium 目录: {src_browsers}")
+        raise SystemError(f"找不到 chromium: {src_browsers}")
+    stash_dir = ROOT / "build" / "_chromium_stash"
+    stash_dir.parent.mkdir(parents=True, exist_ok=True)
+    print(f"   📦 临时移走 chromium: {src_browsers} -> {stash_dir}")
+    shutil.move(str(src_browsers), str(stash_dir))
+
+    try:
+        run([sys.executable, "-m", "PyInstaller", "--noconfirm", "mjai-tool.spec"])
+    finally:
+        # 不管 PyInstaller 成败都得把 chromium 搬回去，否则下次 playwright install
+        # 重新拉一份很慢
+        print(f"   📦 还原 chromium 到 site-packages")
+        shutil.move(str(stash_dir), str(src_browsers))
+
+    # 现在把 chromium 整目录复制到产物（symlinks=True 保 .app bundle 内部软链）
+    print("   📁 复制 chromium 到产物")
+    dst_browsers = ROOT / "dist" / "mjai-tool" / "_internal" / "playwright" / "driver" / "package" / ".local-browsers"
     dst_browsers.parent.mkdir(parents=True, exist_ok=True)
     if dst_browsers.exists():
         shutil.rmtree(dst_browsers)
-    # symlinks=True 让 chromium 包内的软链照搬，bundle 不破
     shutil.copytree(src_browsers, dst_browsers, symlinks=True)
-    print(f"   ✅ chromium 已复制到 {dst_browsers}")
+    print(f"   ✅ chromium 已到 {dst_browsers}")
 
 
 def step_slim():
