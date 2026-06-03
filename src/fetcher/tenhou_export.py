@@ -9,7 +9,9 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 # 项目根 = src/fetcher/tenhou_export.py 上溯三层
-DEFAULT_OUTDIR = Path(__file__).resolve().parent.parent.parent / "data" / "games"
+_DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+DEFAULT_OUTDIR = _DATA_ROOT / "games"     # 天凤 json，喂下游 mjai-reviewer/NAGA
+DEFAULT_RAWDIR = _DATA_ROOT / "raw"       # 雀魂中间态 json，含完整事件流
 
 
 # 雀魂正式 URL 模板。最终拼出来一定要长这样，浏览器才能正确加载游戏。
@@ -92,4 +94,16 @@ def write_tenhou(
     outdir.mkdir(parents=True, exist_ok=True)
     out = outdir / f"{safe_filename(paipu_id)}.json"
     out.write_text(json.dumps(tenhou, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
+def write_majsoul_raw(
+    majsoul: dict,
+    paipu_id: str,
+    outdir: Path = DEFAULT_RAWDIR,
+) -> Path:
+    """落盘雀魂中间态。比天凤详细得多（含每个 RecordAction 事件）。"""
+    outdir.mkdir(parents=True, exist_ok=True)
+    out = outdir / f"{safe_filename(paipu_id)}.json"
+    out.write_text(json.dumps(majsoul, ensure_ascii=False), encoding="utf-8")
     return out

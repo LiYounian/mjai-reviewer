@@ -127,10 +127,12 @@ def _run_fetch(task: FetchTask):
                 task.emit("progress", {"index": i + 1, "total": len(plan), "pid": pid})
                 task.emit("log", f"🎯 [{i+1}/{len(plan)}] 抓 {pid} (timeout {this_timeout:.0f}s)")
                 try:
-                    tenhou = capture.fetch_record(ctx, url, timeout_s=this_timeout)
-                    out = tenhou_export.write_tenhou(tenhou, pid)
-                    task.emit("log", f"✅ [{i+1}/{len(plan)}] 落盘: {out}")
-                    wrote.append({"pid": pid, "path": str(out)})
+                    res = capture.fetch_record(ctx, url, timeout_s=this_timeout)
+                    out = tenhou_export.write_tenhou(res["tenhou"], pid)
+                    raw_out = tenhou_export.write_majsoul_raw(res["majsoul"], pid)
+                    task.emit("log", f"✅ [{i+1}/{len(plan)}] 天凤格式: {out}")
+                    task.emit("log", f"   📦 雀魂原始: {raw_out}")
+                    wrote.append({"pid": pid, "path": str(out), "raw": str(raw_out)})
                 except Exception as e:
                     task.emit("log", f"❌ [{i+1}/{len(plan)}] 失败: {e}")
                     failed.append({"pid": pid, "error": str(e)})

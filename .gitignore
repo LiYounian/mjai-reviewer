@@ -1,5 +1,6 @@
 # —— 抓到的实拓数据（含玩家信息，不入库）——
 data/games/
+data/raw/
 
 # —— 登录态：含 cookie/localStorage，绝不入库 ——
 data/profile/

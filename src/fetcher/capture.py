@@ -88,7 +88,11 @@ def fetch_record(
     paipu_url: str,
     timeout_s: float = 60.0,
 ) -> dict:
-    """打开牌谱页 → 等抓到 fetchGameRecord 响应 → 调 window.__majDecoder 出天凤 json。
+    """打开牌谱页 → 等抓到 fetchGameRecord 响应 → 调 window.__majDecoder。
+
+    返回 {"tenhou": <天凤 dict>, "majsoul": <kbkn3 中间态 dict>}：
+      - tenhou: 喂给 mjai-reviewer/NAGA 等下游 AI 复盘工具，落 data/games/
+      - majsoul: kbkn3 decoder 出来未走 parse() 的雀魂事件流原貌，比天凤详细，落 data/raw/
 
     阻塞，直到拿到结果或超时。
     """
@@ -108,14 +112,14 @@ def fetch_record(
             "请确认：① 已登录 ② URL 正确 ③ 雀魂 Unity 加载完成（首次开窗可能要 30-60s）"
         )
 
-    # 抓到了：失败前先把帧落到 /tmp，这样我们能事后离线分析
+    # 抓到了：把帧落到 /tmp，方便事后离线分析
     fail_dump = Path("/tmp/maj-last-captured.bin")
     fail_dump.write_bytes(cap.captured)
 
     b64 = base64.b64encode(cap.captured).decode("ascii")
     try:
-        tenhou: dict = page.evaluate(
-            "(b64) => window.__majDecoder.toTenhou(b64)", b64
+        result: dict = page.evaluate(
+            "(b64) => window.__majDecoder.decode(b64)", b64
         )
     except Exception as e:
         raise RuntimeError(
@@ -123,4 +127,4 @@ def fetch_record(
             f"原始帧已保存到 {fail_dump} ({len(cap.captured)} 字节)，请离线分析。"
         ) from e
     page.close()
-    return tenhou
+    return result

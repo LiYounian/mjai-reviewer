@@ -125,9 +125,11 @@ def main(argv: list[str] | None = None) -> int:
             this_timeout = cold_timeout if i == 0 else args.timeout
             print(f"[fetch] [{i+1}/{len(plan)}] {pid} (timeout={this_timeout:.0f}s)", flush=True)
             try:
-                tenhou = capture.fetch_record(ctx, url, timeout_s=this_timeout)
-                out = tenhou_export.write_tenhou(tenhou, pid)
-                print(f"[fetch] [{i+1}/{len(plan)}] wrote: {out}", flush=True)
+                res = capture.fetch_record(ctx, url, timeout_s=this_timeout)
+                out = tenhou_export.write_tenhou(res["tenhou"], pid)
+                raw_out = tenhou_export.write_majsoul_raw(res["majsoul"], pid)
+                print(f"[fetch] [{i+1}/{len(plan)}] wrote tenhou: {out}", flush=True)
+                print(f"[fetch] [{i+1}/{len(plan)}] wrote majsoul-raw: {raw_out}", flush=True)
             except Exception as e:
                 print(f"[fetch] [{i+1}/{len(plan)}] FAIL: {e}", flush=True)
                 failures.append((pid, e))
