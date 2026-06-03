@@ -52,6 +52,10 @@ def open_context(
     with sync_playwright() as pw:
         ctx: BrowserContext = pw.chromium.launch_persistent_context(
             user_data_dir=str(profile_dir),
+            # channel='chromium' 强制用完整 chromium 而非 chrome-headless-shell。
+            # 原因: playwright 1.49+ 在 headless=True 时默认走 chrome-headless-shell（更小），
+            # 但 PyInstaller 打包时为省体积只带完整 chromium，找不到 shell 会崩。
+            channel="chromium",
             headless=headless,
             viewport={"width": 1280, "height": 800},
         )
