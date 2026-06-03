@@ -64,11 +64,12 @@
 <body>
 <div class="wrap">
   <h1>牌谱统计 viewer</h1>
-  <div class="sub">读取 <code>report.py</code> 生成的 <code>report.json</code>。所有筛选与切换均在前端聚合，可反复换条件。</div>
+  <div class="sub">支持两种输入：① 原始天凤格式牌谱 <code>data/games/*.json</code>（可多选） ② <code>report.py</code> 生成的 <code>report.json</code>。前端实时解析+聚合，无需后端。</div>
 
   <div class="toolbar">
     <label>数据文件</label>
-    <input type="file" id="file" accept=".json,application/json">
+    <input type="file" id="file" accept=".json,application/json" multiple>
+    <button id="export-btn" style="display:none">导出 report.json</button>
     <span class="meta-info" id="loaded">未加载</span>
   </div>
 
@@ -98,11 +99,335 @@
     <div class="panel"><table id="yaku"></table></div>
   </div>
 
-  <div id="placeholder" class="empty">先选择 report.json 文件</div>
+  <div id="placeholder" class="empty">先选择 data/games/*.json 或 report.json 文件（可多选）</div>
 </div>
 
 <script>
 (function () {
+  // ============================================================
+  // 前端等价于 src/parser/{localize,tenhou,tiles}.py + src/reporter/datafile.py
+  // 让用户直接拖原始 data/games/*.json 进来就能看统计，零环境。
+  // 改任一映射/解析逻辑时，要确保 Python 端同步——或者让 Python 端也走前端这一份。
+  // ============================================================
+
+  // ---- localize ----
+  // 与 src/parser/localize.py 同义：日文 -> 简体。按 key 长度降序替换。
+  const LOCALIZE_TABLE = (() => {
+    const tables = [
+      // 主役名
+      { "門前清自摸和": "门清自摸", "立直": "立直", "槍槓": "抢杠", "嶺上開花": "岭上开花",
+        "海底摸月": "海底摸月", "河底撈魚": "河底捞鱼",
+        "役牌 白": "役牌 白", "役牌 發": "役牌 发", "役牌 中": "役牌 中",
+        "役牌:自風牌": "役牌:自风", "役牌:場風牌": "役牌:场风",
+        "断幺九": "断幺九", "一盃口": "一杯口", "平和": "平和",
+        "混全帯幺九": "混全带幺九", "一気通貫": "一气通贯", "三色同順": "三色同顺",
+        "ダブル立直": "双立直", "三色同刻": "三色同刻", "三槓子": "三杠子",
+        "対々和": "对对和", "三暗刻": "三暗刻", "小三元": "小三元",
+        "混老頭": "混老头", "七対子": "七对子", "純全帯幺九": "纯全带幺九",
+        "混一色": "混一色", "二盃口": "二杯口", "清一色": "清一色",
+        "一発": "一发", "赤ドラ": "赤宝牌", "裏ドラ": "里宝牌",
+        "抜きドラ": "拔北宝牌", "ドラ": "宝牌",
+        "天和": "天和", "地和": "地和", "大三元": "大三元",
+        "四暗刻単騎": "四暗刻单骑", "四暗刻": "四暗刻",
+        "字一色": "字一色", "緑一色": "绿一色", "清老頭": "清老头",
+        "国士無双十三面待ち": "国士无双十三面", "国士無双": "国士无双",
+        "小四喜": "小四喜", "四槓子": "四杠子",
+        "純正九蓮宝燈": "纯正九莲宝灯", "九蓮宝燈": "九莲宝灯",
+        "八連荘": "八连庄", "大四喜": "大四喜",
+        "燕返し": "燕返", "槓振り": "杠振", "十二落抬": "十二落抬",
+        "五門斉": "五门齐", "三連刻": "三连刻", "一色三順": "一色三顺",
+        "一筒摸月": "一筒摸月", "九筒撈魚": "九筒捞鱼", "人和": "人和",
+        "大車輪": "大车轮", "大竹林": "大竹林", "大数隣": "大数邻",
+        "石の上にも三年": "石上三年", "大七星": "大七星" },
+      // 打点级别
+      { "切り上げ満貫": "切上满贯", "流し満貫": "流满", "三倍満": "三倍满",
+        "役満": "役满", "満貫": "满贯", "跳満": "跳满", "倍満": "倍满" },
+      // 终局 tag
+      { "和了": "和了", "流局": "流局", "四開槓": "四开杠", "三家和": "三家和",
+        "九種九牌": "九种九牌", "四風連打": "四风连打", "四家立直": "四家立直" },
+      // 段位
+      { "初心": "初心", "雀士": "雀士", "雀傑": "雀杰", "雀豪": "雀豪",
+        "雀聖": "雀圣", "魂天": "魂天" },
+      // 规则展示串
+      { "段位戦": "段位战", "友人戦": "友人战", "大会戦": "大会战",
+        "東喰": "东·副露", "南喰": "南·副露", "東": "东", "南": "南", "喰": "副露" },
+      // 通用
+      { "飜": "番", "點": "点" },
+    ];
+    const merged = Object.assign({}, ...tables);
+    return Object.entries(merged).sort((a, b) => b[0].length - a[0].length);
+  })();
+
+  function localize(s) {
+    if (typeof s !== "string") return s;
+    let r = s;
+    for (const [from, to] of LOCALIZE_TABLE) {
+      if (r.includes(from)) r = r.split(from).join(to);
+    }
+    return r;
+  }
+
+  const YAKU_LINE = /^(.+?)\((\d+)飜\)$/;
+
+  function parseYakuEntries(yakuStrs) {
+    const out = [];
+    for (let i = 1; i < yakuStrs.length; i++) {
+      const raw = yakuStrs[i];
+      if (typeof raw !== "string") continue;
+      const m = raw.match(YAKU_LINE);
+      if (m) out.push({ name: localize(m[1]), han: parseInt(m[2], 10) });
+      else out.push({ name: localize(raw), han: 0 });
+    }
+    return out;
+  }
+
+  function totalHan(yakuStrs) {
+    // 等价 src/parser/localize.py:total_han — 跳过 yaku[0]（总打点串），其余累计 (X番)
+    let n = 0;
+    for (let i = 1; i < yakuStrs.length; i++) {
+      const y = yakuStrs[i];
+      if (typeof y !== "string") continue;
+      const matches = localize(y).matchAll(/(\d+)番/g);
+      for (const m of matches) n += parseInt(m[1], 10);
+    }
+    return n;
+  }
+
+  const SCORE_CLASS_KEYS = ["役满", "三倍满", "倍满", "跳满", "切上满贯", "满贯", "流满"];
+
+  function detectScoreClass(yakuStrs) {
+    const joined = yakuStrs.filter(s => typeof s === "string").map(localize).join(" ");
+    for (const k of SCORE_CLASS_KEYS) if (joined.includes(k)) return k;
+    return null;
+  }
+
+  // ---- tiles ----
+  // 等价 src/parser/tiles.py。draws/discards 里的字符串元素若以 c/p/m/k/a/f 含字母则是鸣牌串。
+  const CALL_PREFIXES = "cpmkaf";
+
+  function isCallStr(x) {
+    return typeof x === "string" && [...x].some(ch => CALL_PREFIXES.includes(ch));
+  }
+
+  function callType(x) {
+    if (x.startsWith("c")) return "chi";
+    if (x.startsWith("p") || (x.includes("p") && !x.includes("k") && !x.includes("a"))) return "pon";
+    if (x.includes("m")) return "daiminkan";
+    if (x.includes("k")) return "kakan";
+    if (x.includes("a")) return "ankan";
+    if (x.includes("f")) return "kita";
+    return "unknown";
+  }
+
+  function isRiichiDiscard(x) {
+    return typeof x === "string" && x.startsWith("r");
+  }
+
+  // ---- tenhou parser ----
+  // 等价 src/parser/tenhou.py。
+  const ROUND_WIND = { 0: "东", 1: "南", 2: "西", 3: "北" };
+
+  function roundName(code) {
+    const wind = ROUND_WIND[Math.floor(code / 4)];
+    const ju = (code % 4) + 1;
+    return `${wind}${ju}局`;
+  }
+
+  function parseEnding(end) {
+    if (!end || !end.length) return { type: "unknown" };
+    const tag = end[0];
+    if (tag === "和了") {
+      const agaris = [];
+      for (let i = 1; i < end.length; i += 2) {
+        const delta = end[i];
+        const detail = end[i + 1] || [];
+        const who = detail[0] ?? null;
+        const frm = detail[1] ?? null;
+        const yaku = detail.slice(3);
+        agaris.push({
+          delta, who, from: frm,
+          tsumo: who === frm,
+          yaku,
+          score_class: detectScoreClass(yaku),
+          han: totalHan(yaku),
+        });
+      }
+      return { type: "和了", agaris };
+    }
+    if (tag === "流局" || tag === "流し満貫" || tag === "流し満貝" || tag === "流し満贯") {
+      return { type: "流局", delta: end[1] || [0, 0, 0, 0] };
+    }
+    // 中途流局: 九種九牌 / 四風連打 / 四開槓 / 三家和 / 四家立直
+    return { type: "中途流局", reason: tag, delta: [0, 0, 0, 0] };
+  }
+
+  function parseRound(raw, nplayers) {
+    const code = raw[0][0];
+    const players = [];
+    for (let seat = 0; seat < nplayers; seat++) {
+      const base = 4 + seat * 3;
+      const draws = raw[base + 1] || [];
+      const discards = raw[base + 2] || [];
+      const riichi = discards.some(isRiichiDiscard);
+      const calls = [];
+      for (const x of draws) if (isCallStr(x)) calls.push(callType(x));
+      for (const x of discards) if (isCallStr(x)) calls.push(callType(x));
+      const fulu = calls.filter(c => c === "chi" || c === "pon" || c === "daiminkan" || c === "kakan");
+      players.push({
+        seat, riichi, calls,
+        fulu_count: fulu.length,
+        menzen: fulu.length === 0,
+      });
+    }
+
+    const ending = parseEnding(raw.length > 16 ? raw[16] : null);
+
+    // 回填 riichi_outcome, 同 src/parser/tenhou.py
+    for (const p of players) {
+      if (!p.riichi) { p.riichi_outcome = "none"; continue; }
+      let outcome = "other";
+      if (ending.type === "和了") {
+        for (const a of ending.agaris) {
+          if (a.who === p.seat) { outcome = "won"; break; }
+          if (!a.tsumo && a.from === p.seat) { outcome = "dealin"; break; }
+        }
+      } else if (ending.type === "流局") {
+        const d = ending.delta || [];
+        outcome = (p.seat < d.length && d[p.seat] > 0) ? "draw_tenpai" : "draw_noten";
+      }
+      p.riichi_outcome = outcome;
+    }
+
+    return {
+      round_code: code,
+      round_name: roundName(code),
+      honba: raw[0][1],
+      kyoutaku: raw[0][2],
+      dealer_seat: code % 4,
+      players,
+      ending,
+    };
+  }
+
+  function parseGame(data) {
+    const names = data.name || ["", "", "", ""];
+    const nplayers = (names.length >= 4 && names[3] === "") ? 3 : 4;
+    const sc = data.sc || [];
+    const final = [];
+    for (let seat = 0; seat < 4; seat++) {
+      if (2 * seat + 1 < sc.length) {
+        final.push({ seat, point: sc[2 * seat], score_delta: sc[2 * seat + 1] });
+      }
+    }
+    const rounds = (data.log || []).map(r => parseRound(r, nplayers));
+    return {
+      ref: data.ref,
+      rule: data.rule || {},
+      title: data.title || [],
+      names, nplayers, final, rounds,
+    };
+  }
+
+  // ---- datafile builder ----
+  // 等价 src/reporter/datafile.py
+  function placementOf(final) {
+    const ranked = [...final].sort((a, b) => b.point - a.point);
+    const out = {};
+    ranked.forEach((f, i) => { out[f.seat] = i + 1; });
+    return out;
+  }
+
+  function roundDeltas(ending, nplayers) {
+    const d = new Array(nplayers).fill(0);
+    if (ending.type === "和了") {
+      for (const a of ending.agaris) {
+        const ad = a.delta || [];
+        for (let i = 0; i < Math.min(nplayers, ad.length); i++) d[i] += ad[i];
+      }
+    } else if (ending.type === "流局") {
+      const ed = ending.delta || [];
+      for (let i = 0; i < Math.min(nplayers, ed.length); i++) d[i] += ed[i];
+    }
+    return d;
+  }
+
+  function buildReport(games) {
+    const ordered = [...games].sort((a, b) => (a.ref || "").localeCompare(b.ref || ""));
+    const outGames = ordered.map((g, idx) => {
+      const ref = g.ref || "";
+      const refPrefix = ref.split("-")[0] || "";
+      const label = refPrefix ? `#${idx + 1} ${refPrefix}` : `#${idx + 1}`;
+      const placeOf = placementOf(g.final);
+      const final = g.final.map(f => ({
+        seat: f.seat,
+        name: g.names[f.seat],
+        point: f.point,
+        score_delta: f.score_delta,
+        placement: placeOf[f.seat],
+      }));
+      const rounds = g.rounds.map(r => {
+        const deltas = roundDeltas(r.ending, g.nplayers);
+        const players = r.players.map(p => ({
+          seat: p.seat,
+          name: g.names[p.seat],
+          is_dealer: p.seat === r.dealer_seat,
+          riichi: p.riichi,
+          fulu_count: p.fulu_count,
+          menzen: p.menzen,
+          riichi_outcome: p.riichi_outcome,
+          delta: p.seat < deltas.length ? deltas[p.seat] : 0,
+        }));
+        const agaris = [];
+        if (r.ending.type === "和了") {
+          for (const a of r.ending.agaris) {
+            const who = a.who;
+            const delta = a.delta || [];
+            const pointWon = (who != null && who < delta.length) ? Math.max(delta[who], 0) : 0;
+            agaris.push({
+              who,
+              who_name: who != null ? g.names[who] : null,
+              from: a.from,
+              from_name: a.from != null ? g.names[a.from] : null,
+              tsumo: a.tsumo,
+              han: a.han || 0,
+              score_class: a.score_class || null,
+              yaku: parseYakuEntries(a.yaku || []),
+              point_won: pointWon,
+            });
+          }
+        }
+        return {
+          round_name: r.round_name,
+          honba: r.honba,
+          dealer_seat: r.dealer_seat,
+          ending_type: r.ending.type,
+          ending_reason: r.ending.reason || null,
+          players, agaris,
+        };
+      });
+      return {
+        ref, label,
+        title: g.title,
+        rule_disp: localize((g.rule || {}).disp || ""),
+        names: g.names,
+        nplayers: g.nplayers,
+        final, rounds,
+      };
+    });
+    return {
+      schema: "mjai-reviewer/stats/v1",
+      generated_at: new Date().toISOString(),
+      games: outGames,
+    };
+  }
+
+  // 暴露解析器到 window，方便外部脚本/对比测试调用（不影响生产功能）
+  window.MJAI = { parseGame, buildReport, localize };
+
+  // ============================================================
+  // 以下是原本就有的展示层逻辑（筛选/聚合/渲染）
+  // ============================================================
+
   let DATA = null;
   let MODE = "count"; // "count" | "ratio"
   let OVERVIEW_SORT = { col: "avg_place", dir: "asc" }; // 默认按均顺升序
@@ -114,30 +439,63 @@
   const signed = (x, d = 1) => (x == null ? "-" : (x > 0 ? "+" : "") + Number(x).toFixed(d));
 
   // ===== 文件加载 =====
-  $("file").addEventListener("change", (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        DATA = JSON.parse(r.result);
-        if (!DATA.schema || !DATA.schema.startsWith("mjai-reviewer/stats/")) {
-          alert("文件 schema 不识别: " + DATA.schema);
-          return;
-        }
-        onLoaded(f.name);
-      } catch (err) {
-        alert("解析失败: " + err.message);
+  // 支持两种输入:
+  //   (A) report.json: 已聚合过的事实表 (schema 字段为 "mjai-reviewer/stats/v1")
+  //   (B) data/games/*.json: 原始天凤格式牌谱（多选时全部解析后合并）
+  $("file").addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    try {
+      const parsed = await Promise.all(files.map(readJSON));
+      // 看第一个判断是哪种格式
+      const isReport = parsed.length === 1 && parsed[0]?.schema?.startsWith?.("mjai-reviewer/stats/");
+      if (isReport) {
+        DATA = parsed[0];
+        onLoaded(`${files[0].name} · ${DATA.games.length} 场牌谱`);
+      } else {
+        // 原始天凤 json: 跑前端解析 + datafile.build
+        const games = parsed.map((d, i) => {
+          if (!d.log || !d.name) {
+            throw new Error(`${files[i].name} 不像天凤格式 (缺 log/name 字段)`);
+          }
+          return parseGame(d);
+        });
+        DATA = buildReport(games);
+        onLoaded(`${files.length} 个原始牌谱 · ${DATA.games.length} 场（前端实时解析）`);
       }
-    };
-    r.readAsText(f);
+    } catch (err) {
+      console.error(err);
+      alert("加载失败: " + err.message);
+    }
   });
 
-  function onLoaded(filename) {
-    $("loaded").textContent = `${filename} · ${DATA.games.length} 场牌谱 · 生成于 ${DATA.generated_at || "-"}`;
+  function readJSON(f) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => { try { resolve(JSON.parse(r.result)); } catch (e) { reject(new Error(`${f.name}: ${e.message}`)); } };
+      r.onerror = () => reject(new Error(`${f.name}: 读文件失败`));
+      r.readAsText(f);
+    });
+  }
+
+  // ===== 导出 =====
+  $("export-btn").addEventListener("click", () => {
+    if (!DATA) return;
+    const blob = new Blob([JSON.stringify(DATA, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "report.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+
+  function onLoaded(metaText) {
+    window.__DATA = DATA; // 调试用; 生产无害
+    $("loaded").textContent = `${metaText} · 生成于 ${DATA.generated_at || "-"}`;
     $("placeholder").style.display = "none";
     $("filters").style.display = "";
     $("content").style.display = "";
+    $("export-btn").style.display = "";
 
     // 牌谱下拉
     const gameSel = $("game-sel");

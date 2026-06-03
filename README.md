@@ -140,12 +140,21 @@ python3 stats.py data/games/*.json
 
 ### 出报告（浏览器看板）
 
+`viewer.html` 直接接受**两种输入**，挑一种即可：
+
+**方式 A（推荐给只看不抓的朋友）**：直接拖入原始 `data/games/*.json`（可多选）
+浏览器双击打开 `viewer.html` → 文件选择器选一或多个原始天凤格式牌谱 → 前端实时解析 + 聚合。**完全不需要 Python**，把 json 文件发给朋友，他双击 viewer.html 就能看。
+
+**方式 B（适合预先归档大批量）**：先用 Python 出 `report.json`，再加载
+
 ```bash
 python3 report.py data/games/*.json              # 输出 ./report.json
 python3 report.py data/games/*.json -o my.json   # 自定输出路径
 ```
 
-然后在浏览器双击打开 `viewer.html`（或 `open viewer.html`），用文件选择器加载刚生成的 JSON。看板提供：
+报告生成后，viewer 会自动识别 `schema` 字段走快路径。也可以在前端用方式 A 加载完后点 **导出 report.json** 按钮把当前数据归档成报告文件。
+
+看板提供：
 
 - **牌谱下拉**：全部 / 单场（一场牌谱 = 东风/半庄全场）
 - **玩家下拉**：全部 / 单人
@@ -153,7 +162,7 @@ python3 report.py data/games/*.json -o my.json   # 自定输出路径
 - **总览表**（26 列）：表头点击排序，活动列加 ↑/↓ 标记
 - **番型表**（行=役、列=玩家）：三种排序——出现先后 / 占比最大 / 役名字典序
 
-viewer 是纯前端单文件、无外部依赖（包括离线无 CDN 也能用）。换数据文件、切筛选都不用回 Python。
+viewer 是纯前端单文件、无外部依赖（离线无 CDN 也能用）。前端解析逻辑与 Python 端字节级一致。
 
 ## 风险与边界
 
