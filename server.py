@@ -14,11 +14,14 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import queue
 import random
 import re
+import signal
+import socket
 import sys
 import threading
 import time
@@ -482,14 +485,159 @@ class ThreadingHTTPServer(HTTPServer):
             self.shutdown_request(request)
 
 
+PID_FILE = PROJECT_ROOT / ".server.pid"
+
+
+def _port_in_use(port: int) -> bool:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.3)
+    try:
+        s.connect(("127.0.0.1", port))
+        return True
+    except (ConnectionRefusedError, OSError):
+        return False
+    finally:
+        s.close()
+
+
+def _read_pid_file() -> int | None:
+    if not PID_FILE.exists():
+        return None
+    try:
+        return int(PID_FILE.read_text().strip())
+    except Exception:
+        return None
+
+
+def _is_our_server_alive(port: int, pid: int | None) -> bool:
+    """端口被占，确认占用方是我们之前留下的 server.py 实例。
+
+    判定: PID 存在 + /api/status 能 200 返回 + 路径里能拿到我们项目的标识。
+    """
+    # 1) 同主机 status 探活
+    if not _port_in_use(port):
+        return False
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=1.5) as r:
+            if r.status != 200:
+                return False
+            data = json.loads(r.read().decode("utf-8"))
+            # 任何字段是我们设计的就算（current_task / logged_in 都行）
+            if "logged_in" not in data:
+                return False
+    except Exception:
+        return False
+    # PID 不一定能拿到（旧版没写 pid 文件），不强求
+    return True
+
+
+def _kill_pid(pid: int, timeout_s: float = 5.0) -> bool:
+    """优雅杀进程：SIGTERM → 等 → 还活着就 SIGKILL。返回是否成功结束。"""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except Exception:
+        return False
+    end = time.time() + timeout_s
+    while time.time() < end:
+        try:
+            os.kill(pid, 0)  # 0 = 探活
+        except ProcessLookupError:
+            return True
+        time.sleep(0.1)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except Exception:
+        pass
+    time.sleep(0.2)
+    try:
+        os.kill(pid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+
+
+def _write_pid_file():
+    try:
+        PID_FILE.write_text(str(os.getpid()))
+    except Exception:
+        pass
+
+
+def _cleanup_pid_file():
+    try:
+        if PID_FILE.exists():
+            current = _read_pid_file()
+            if current == os.getpid():
+                PID_FILE.unlink()
+    except Exception:
+        pass
+
+
 def main():
     ap = argparse.ArgumentParser(description="启 viewer + 抓取 server (本地 only)")
     ap.add_argument("--port", type=int, default=9233)
     ap.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    ap.add_argument(
+        "--on-conflict",
+        choices=["ask", "kill", "abort", "open"],
+        default="ask",
+        help="端口被占时的策略：ask=交互问 / kill=直接杀重启 / abort=放弃 / open=打开浏览器指向原 server",
+    )
     args = ap.parse_args()
 
     if not VIEWER_HTML.exists():
         print(f"❌ 找不到 {VIEWER_HTML}", file=sys.stderr)
+        sys.exit(1)
+
+    # ---- 端口冲突处理 ----
+    existing_pid = _read_pid_file()
+    if _is_our_server_alive(args.port, existing_pid):
+        url = f"http://127.0.0.1:{args.port}/"
+        pid_str = f"PID {existing_pid}" if existing_pid else "未知 PID"
+        print(f"⚠️  已有一个 server 在 {url} 运行（{pid_str}）。")
+        action = args.on_conflict
+        if action == "ask":
+            try:
+                ans = input("   [k]杀掉重启 / [o]打开浏览器用原 server / [q]退出  默认 o: ").strip().lower()
+            except EOFError:
+                ans = ""
+            if ans in ("k", "kill"):
+                action = "kill"
+            elif ans in ("q", "quit"):
+                action = "abort"
+            else:
+                action = "open"
+        if action == "abort":
+            print("👋 已退出，原 server 仍在跑。")
+            sys.exit(0)
+        if action == "open":
+            print(f"🌐 打开浏览器到原 server: {url}")
+            webbrowser.open(url)
+            sys.exit(0)
+        if action == "kill":
+            if existing_pid is None:
+                print("❌ 没找到 PID 文件，无法定向杀。请手动到那个终端窗口按 Ctrl+C。")
+                sys.exit(1)
+            print(f"🔪 杀掉旧 server (PID {existing_pid})…")
+            if not _kill_pid(existing_pid):
+                print("❌ 杀失败。请手动到那个终端窗口按 Ctrl+C 后重试。")
+                sys.exit(1)
+            # 等端口释放
+            for _ in range(20):
+                if not _port_in_use(args.port):
+                    break
+                time.sleep(0.1)
+            else:
+                print("❌ 端口仍被占，放弃。")
+                sys.exit(1)
+            print("✅ 旧 server 已结束，开始启新的。")
+    elif _port_in_use(args.port):
+        # 端口被占但不是我们的 server（别的程序）
+        print(f"❌ 端口 {args.port} 被别的程序占用。")
+        print(f"   解决：换端口 → python3 server.py --port 9234")
         sys.exit(1)
 
     ensure_dirs()
@@ -497,6 +645,9 @@ def main():
 
     addr = ("127.0.0.1", args.port)
     httpd = ThreadingHTTPServer(addr, Handler)
+    _write_pid_file()
+    atexit.register(_cleanup_pid_file)
+
     url = f"http://127.0.0.1:{args.port}/"
     print(f"✅ 已启动: {url}")
     print(f"   按 Ctrl-C 关闭")
@@ -509,6 +660,8 @@ def main():
     except KeyboardInterrupt:
         print("\n👋 关闭中…")
         httpd.shutdown()
+    finally:
+        _cleanup_pid_file()
 
 
 if __name__ == "__main__":

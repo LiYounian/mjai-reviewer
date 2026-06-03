@@ -44,6 +44,9 @@ viewer-preview*.png
 # —— 用户级运行时配置（含 data_dir 等本机路径，按机器走）——
 config.json
 
+# —— server 运行时 PID 文件 ——
+.server.pid
+
 # —— 参考资料里：tensoul 的 node_modules（46MB 的大头）——
 参考资料/三方代码/tensoul/node_modules/
 
