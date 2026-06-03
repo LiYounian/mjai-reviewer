@@ -85,13 +85,16 @@ def _run_fetch(task: FetchTask):
         from src.fetcher import browser, capture, tenhou_export
 
         # 解析 + 跳过已存在
+        # 用户粘贴的可能是: "雀魂牌谱:https://...", "https://...", "paipu=...", 裸 ID 任一种。
+        # 全部归一为牌谱 ID，再拼回标准 URL 喂给 playwright，避免 goto 收到脏字符串。
         plan = []
-        for url in task.urls:
+        for raw in task.urls:
             try:
-                pid = tenhou_export.parse_paipu_id(url)
+                pid = tenhou_export.extract_paipu_id(raw)
             except Exception as e:
-                task.emit("log", f"❌ 链接无法识别: {url} ({e})")
+                task.emit("log", f"❌ 链接无法识别: {raw} ({e})")
                 continue
+            url = tenhou_export.url_for(pid)
             out_path = tenhou_export.DEFAULT_OUTDIR / f"{tenhou_export.safe_filename(pid)}.json"
             if out_path.exists() and not task.force:
                 task.emit("log", f"⏭ 跳过 {pid}（已抓过，要重抓请勾'强制重抓'）")
