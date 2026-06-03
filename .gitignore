@@ -31,6 +31,14 @@ __pycache__/
 /tmp/maj-frames/
 /tmp/maj-last-captured.bin
 
+# —— 报告输出（含玩家信息，跟着 data/games/ 一样不入库）——
+report.json
+*.report.json
+report-preview*.png
+
+# —— Claude Code 本地配置（CLAUDE.md 入库给协作者；.claude/ 含本地权限设置不入库）——
+.claude/
+
 # —— 参考资料里：tensoul 的 node_modules（46MB 的大头）——
 参考资料/三方代码/tensoul/node_modules/
 
