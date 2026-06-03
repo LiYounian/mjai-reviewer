@@ -1,23 +1,29 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec：把 server + viewer + inject + Playwright + Chromium 打成单文件夹。
+"""PyInstaller spec：把 server + viewer + inject + Playwright 打成单文件夹。
 
 入口: server.py
-模式: --onedir (打成目录而非 onefile，因为 chromium 是数据文件不能压成 exe)
+模式: --onedir
 产物: dist/mjai-tool/
 
-关键点:
-- Playwright 默认从 ~/Library/Caches/ms-playwright/ 找 chromium，PyInstaller 看不到。
-  build.py 会先 export PLAYWRIGHT_BROWSERS_PATH=0 重装 chromium 进 playwright 包内，
-  spec 这里的 collect_data_files('playwright') 才能把它一起带走。
-- 运行时 server.py 自己会 export PLAYWRIGHT_BROWSERS_PATH=0，让打包后的 playwright 找包内的 chromium。
+⚠️ chromium 不在这里收 — 它是个完整 .app bundle (mac) / 目录 (win)，
+PyInstaller 走 binary 流程会试图给里面所有 mach-O ad-hoc 重签，破坏 bundle。
+所以 spec 只收 playwright 的 python + driver/node 部分，chromium 由 build.py
+在 PyInstaller 完成后整目录 cp 进去（保 bundle 结构完整）。
+
+运行时 server.py 自己会 export PLAYWRIGHT_BROWSERS_PATH=0，
+让 playwright 在包内 (driver/package/.local-browsers/) 找 chromium。
 """
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 SPEC_DIR = Path(SPECPATH).resolve()
 
-# Playwright 包数据：driver/、bundled chromium（PLAYWRIGHT_BROWSERS_PATH=0 时装在这里）
-playwright_datas = collect_data_files("playwright", include_py_files=False)
+# Playwright python 包数据 - 不含 chromium .app
+all_playwright_datas = collect_data_files("playwright", include_py_files=False)
+playwright_datas = [
+    (src, dst) for (src, dst) in all_playwright_datas
+    if ".local-browsers" not in src.replace("\\", "/")
+]
 playwright_hidden = collect_submodules("playwright")
 
 # 项目内静态资源

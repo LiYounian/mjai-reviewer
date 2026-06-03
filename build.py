@@ -19,6 +19,12 @@ import sys
 import time
 from pathlib import Path
 
+# Windows cmd 默认 cp1252 不能编码 emoji/中文，print 会 UnicodeEncodeError。
+# 强制 stdout/stderr 走 UTF-8。Python 3.7+ 都支持。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 ROOT = Path(__file__).resolve().parent
 IS_WIN = platform.system() == "Windows"
 # Windows 下 npm 实际是 npm.cmd，shell=True 让 PATHEXT 自己解析；mac/linux 直接走 npm
@@ -63,6 +69,21 @@ def step_pyinstaller():
             shutil.rmtree(p)
 
     run([sys.executable, "-m", "PyInstaller", "--noconfirm", "mjai-tool.spec"])
+
+    # PyInstaller 跳过了 chromium .app（spec 显式排除）。手动整目录复制进去，
+    # 不让 PyInstaller 去重签里面的 mach-O — 那会破坏 .app bundle 结构。
+    print("   📁 复制 chromium 到产物（绕过 PyInstaller 签名步骤）")
+    import playwright as _pw
+    src_browsers = Path(_pw.__file__).parent / "driver" / "package" / ".local-browsers"
+    dst_browsers = ROOT / "dist" / "mjai-tool" / "_internal" / "playwright" / "driver" / "package" / ".local-browsers"
+    if not src_browsers.exists():
+        raise SystemError(f"找不到源 chromium 目录: {src_browsers}")
+    dst_browsers.parent.mkdir(parents=True, exist_ok=True)
+    if dst_browsers.exists():
+        shutil.rmtree(dst_browsers)
+    # symlinks=True 让 chromium 包内的软链照搬，bundle 不破
+    shutil.copytree(src_browsers, dst_browsers, symlinks=True)
+    print(f"   ✅ chromium 已复制到 {dst_browsers}")
 
 
 def step_slim():
