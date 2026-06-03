@@ -10,10 +10,10 @@ import stat
 
 from playwright.sync_api import sync_playwright, BrowserContext
 
-from src.config import get_profile_dir, PROJECT_ROOT as _PROJECT_ROOT
+from src.config import get_profile_dir, RESOURCE_ROOT
 
-# inject.js 由 inject/ 子项目 esbuild 构建产生
-INJECT_JS = _PROJECT_ROOT / "inject" / "dist" / "inject.js"
+# inject.js 由 inject/ 子项目 esbuild 构建产生（开发）/ 打包时收进 RESOURCE_ROOT
+INJECT_JS = RESOURCE_ROOT / "inject" / "dist" / "inject.js"
 
 
 def _profile_has_login(profile_dir: Path) -> bool:

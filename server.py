@@ -31,12 +31,18 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from src.config import (
-    PROJECT_ROOT, get_data_dir, get_games_dir, get_raw_dir,
+# Playwright 在 frozen 包里要找 chromium：让它走我们打进包内的 playwright/driver/.../chrome-mac/
+# 必须在 import playwright 之前 set
+if getattr(sys, "frozen", False):
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+
+from src.config import (  # noqa: E402
+    PROJECT_ROOT, RESOURCE_ROOT, USER_DATA_ROOT,
+    get_data_dir, get_games_dir, get_raw_dir,
     set_data_dir, ensure_dirs, load_config,
 )
 
-VIEWER_HTML = PROJECT_ROOT / "viewer.html"
+VIEWER_HTML = RESOURCE_ROOT / "viewer.html"
 
 # 全局抓取任务状态。任何时刻只有 0 或 1 个 fetch 任务。
 _FETCH_LOCK = threading.Lock()
@@ -485,7 +491,7 @@ class ThreadingHTTPServer(HTTPServer):
             self.shutdown_request(request)
 
 
-PID_FILE = PROJECT_ROOT / ".server.pid"
+PID_FILE = USER_DATA_ROOT / ".server.pid"
 
 
 def _port_in_use(port: int) -> bool:

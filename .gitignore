@@ -47,6 +47,11 @@ config.json
 # —— server 运行时 PID 文件 ——
 .server.pid
 
+# —— PyInstaller 打包产物 ——
+build/
+dist/
+*.spec.bak
+
 # —— 参考资料里：tensoul 的 node_modules（46MB 的大头）——
 参考资料/三方代码/tensoul/node_modules/
 

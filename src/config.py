@@ -17,11 +17,27 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = PROJECT_ROOT / "config.json"
-DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
+# 区分两个路径概念：
+#   RESOURCE_ROOT — 静态资源所在地（viewer.html / inject.js）
+#                   开发时 = 项目根；frozen 时 = sys._MEIPASS（PyInstaller 解压目录）
+#   USER_DATA_ROOT — 用户数据落盘根（config.json / data/）
+#                   开发时 = 项目根；frozen 时 = ~/.mjai-tool/（不能写进 app 包，只读）
+_FROZEN = getattr(sys, "frozen", False)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent  # 兼容旧代码
+
+if _FROZEN:
+    # PyInstaller onedir: 资源在 _MEIPASS 旁的 _internal 里
+    RESOURCE_ROOT = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    USER_DATA_ROOT = Path.home() / ".mjai-tool"
+else:
+    RESOURCE_ROOT = PROJECT_ROOT
+    USER_DATA_ROOT = PROJECT_ROOT
+
+CONFIG_PATH = USER_DATA_ROOT / "config.json"
+DEFAULT_DATA_DIR = USER_DATA_ROOT / "data"
 
 
 def load_config() -> dict:
@@ -34,6 +50,7 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -49,8 +66,8 @@ def get_data_dir() -> Path:
     expanded = os.path.expanduser(os.path.expandvars(raw))
     p = Path(expanded)
     if not p.is_absolute():
-        # 相对路径相对于项目根（朋友粘个 "myData" 这种也合理）
-        p = PROJECT_ROOT / p
+        # 相对路径相对于用户数据根（朋友粘个 "myData" 这种也合理）
+        p = USER_DATA_ROOT / p
     return p.resolve()
 
 
