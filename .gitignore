@@ -35,6 +35,7 @@ __pycache__/
 report.json
 *.report.json
 report-preview*.png
+viewer-preview*.png
 
 # —— Claude Code 本地配置（CLAUDE.md 入库给协作者；.claude/ 含本地权限设置不入库）——
 .claude/
