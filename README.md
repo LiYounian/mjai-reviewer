@@ -78,13 +78,35 @@ data/games/<paipu_id>.json    （天凤格式，下游 mjai-reviewer/NAGA 也吃
 
 ## 给非程序员朋友的简易用法
 
-如果你只想"双击就用"、不想碰命令行：
+> **不想装环境的：** 去 [Releases 页](https://github.com/LiYounian/mjai-reviewer/releases) 下载最新版的预编译包。
+> - macOS：`mjai-tool-macos-arm64.zip`（Apple Silicon，M1 及以后）
+> - Windows：`mjai-tool-windows-x64.zip`
+>
+> 解压后双击文件夹里的 `mjai-tool`（mac）/ `mjai-tool.exe`（win）即可。第一次打开后浏览器会自动开 http://127.0.0.1:9233/，登录雀魂 → 粘链接抓 → 看统计。
+>
+> ### macOS 第一次打开会被拦
+>
+> 因为没花 99 美刀做苹果开发者签名，macOS 会提示"无法验证开发者"。三选一处理：
+>
+> 1. **右键 → 打开**：在 Finder 里**右键** `mjai-tool` 点"打开"，弹窗里再点一次"打开"。以后就不拦了。
+> 2. **系统设置 → 隐私与安全性**：拦截后下方会有"仍要打开"按钮，点一下输密码。
+> 3. **命令行清隔离属性**：终端跑 `xattr -dr com.apple.quarantine /path/to/mjai-tool`，一劳永逸。
+>
+> ### Windows 第一次打开会被拦
+>
+> Windows SmartScreen 会提示"已保护你的电脑"。点"更多信息" → "仍要运行"。
+>
+> 数据存在 `~/.mjai-tool/`（mac）或 `%USERPROFILE%\.mjai-tool\`（win）下，里面会自动建 `data/games/`、`data/raw/`、`data/profile/` 三个子目录。
 
-1. **一次性环境**（找会装的人帮一次就行）：装 Python 3.9+、Node.js 20+、按下面"一次性安装"跑完
-2. **以后每次用**：双击仓库根目录的 **`启动.command`**（macOS）或 **`启动.bat`**（Windows）
-   - 终端窗口会启动一个本地 server，浏览器自动打开
-   - 顶部两个 tab：`📊 统计` 看牌谱分析；`🌐 抓取` 登录雀魂、粘贴牌谱链接抓
-   - 关闭：终端窗口 Ctrl+C 或 ⌘+Q
+---
+
+## 给会一点命令行的朋友：源码运行
+
+如果你想"双击就用"但 Releases 上没你的平台（比如 Intel Mac、Linux），按下面安装环境后，双击仓库根目录的 **`启动.command`**（macOS）或 **`启动.bat`**（Windows）：
+
+- 终端窗口会启动一个本地 server，浏览器自动打开
+- 顶部两个 tab：`📊 统计` 看牌谱分析；`🌐 抓取` 登录雀魂、粘贴牌谱链接抓
+- 关闭：终端窗口 Ctrl+C 或 ⌘+Q
 
 > macOS 第一次双击 `启动.command` 可能被拦"无法验证开发者"。解决：在 Finder 里**右键点它 → 打开**，弹窗里再点一次"打开"，以后就不会拦了。
 

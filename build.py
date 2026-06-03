@@ -12,6 +12,7 @@
 撞坑了？看 mjai-tool.spec 顶部注释 + dist/mjai-tool/ 试运行 stack trace。
 """
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+IS_WIN = platform.system() == "Windows"
+# Windows 下 npm 实际是 npm.cmd，shell=True 让 PATHEXT 自己解析；mac/linux 直接走 npm
+NPM = "npm.cmd" if IS_WIN else "npm"
 
 
 def run(cmd, **kw):
@@ -28,15 +32,15 @@ def run(cmd, **kw):
 
 
 def step_inject():
-    print("\n=== 1/4 重建 inject.js ===")
+    print("\n=== 1/5 重建 inject.js ===")
     inject_dir = ROOT / "inject"
     if not (inject_dir / "node_modules").exists():
-        run(["npm", "install"], cwd=inject_dir)
-    run(["npm", "run", "build"], cwd=inject_dir)
+        run([NPM, "install"], cwd=inject_dir)
+    run([NPM, "run", "build"], cwd=inject_dir)
 
 
 def step_playwright():
-    print("\n=== 2/4 装 chromium 到 playwright 包内 ===")
+    print("\n=== 2/5 装 chromium 到 playwright 包内 ===")
     # 让 chromium 装进 site-packages/playwright/driver/package/.local-browsers/
     # 这样 PyInstaller 的 collect_data_files('playwright') 能扫到
     env = os.environ.copy()
@@ -51,7 +55,7 @@ def step_playwright():
 
 
 def step_pyinstaller():
-    print("\n=== 3/4 PyInstaller 打包 ===")
+    print("\n=== 3/5 PyInstaller 打包 ===")
     # 清干净旧 build artifacts
     for d in ("build", "dist"):
         p = ROOT / d
@@ -62,7 +66,11 @@ def step_pyinstaller():
 
 
 def step_slim():
-    """瘦身：删 playwright 不必要的浏览器副本（headless_shell + ffmpeg）。"""
+    """瘦身：删 playwright 不必要的浏览器副本（headless_shell + ffmpeg）。
+
+    headless_shell 我们在 browser.py 里强制走 channel='chromium' 跳过；
+    ffmpeg 是录视频用，我们用不到。
+    """
     print("\n=== 4/5 瘦身 ===")
     browsers = ROOT / "dist" / "mjai-tool" / "_internal" / "playwright" / "driver" / "package" / ".local-browsers"
     if not browsers.exists():
@@ -88,18 +96,27 @@ def step_report():
         print("❌ 找不到 dist/mjai-tool/")
         return
 
+    # 统计实际磁盘大小（去重硬链接）
+    seen_inodes: set[int] = set()
     total = 0
     for p in out_dir.rglob("*"):
-        if p.is_file():
-            total += p.stat().st_size
+        if not p.is_file():
+            continue
+        st = p.stat()
+        if not IS_WIN:
+            # POSIX: 同 inode 的硬链接只计一次
+            if st.st_ino in seen_inodes:
+                continue
+            seen_inodes.add(st.st_ino)
+        total += st.st_size
 
     mb = total / 1024 / 1024
     print(f"📦 产物目录: {out_dir}")
-    print(f"   大小: {mb:.1f} MB ({total} bytes)")
-    exe = out_dir / "mjai-tool"
+    print(f"   大小: {mb:.1f} MB")
+    exe_name = "mjai-tool.exe" if IS_WIN else "mjai-tool"
+    exe = out_dir / exe_name
     if exe.exists():
         print(f"   入口: {exe}")
-        print(f"\n   测试运行: ./dist/mjai-tool/mjai-tool")
 
 
 def main():

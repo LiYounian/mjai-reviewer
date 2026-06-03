@@ -1,0 +1,84 @@
+name: Release
+
+# 推 v* tag 时触发，产 macOS + Windows 包并挂到 Release。
+# 也支持手动触发（Actions 页面 Run workflow），不会真发 Release，只把包做出来给你下载（artifacts）。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write  # 创建 Release 需要
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos-arm64
+            archive_ext: zip
+          - os: windows-latest
+            platform: windows-x64
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install playwright pyinstaller
+
+      - name: Install npm deps
+        working-directory: inject
+        run: npm ci
+
+      - name: Build (npm + playwright + pyinstaller + slim)
+        run: python build.py
+
+      - name: Create archive (macOS)
+        if: matrix.os == 'macos-latest'
+        working-directory: dist
+        run: |
+          # ditto 比 zip 更适合 mac，能正确处理 .app bundle 元数据
+          ditto -c -k --keepParent --sequesterRsrc mjai-tool mjai-tool-${{ matrix.platform }}.zip
+          ls -lh *.zip
+
+      - name: Create archive (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: dist
+        shell: pwsh
+        run: |
+          Compress-Archive -Path mjai-tool -DestinationPath mjai-tool-${{ matrix.platform }}.zip
+          Get-ChildItem *.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mjai-tool-${{ matrix.platform }}
+          path: dist/mjai-tool-${{ matrix.platform }}.zip
+          retention-days: 14
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/mjai-tool-${{ matrix.platform }}.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
