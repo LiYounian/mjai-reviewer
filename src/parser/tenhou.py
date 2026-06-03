@@ -25,6 +25,7 @@
 import json
 
 from .tiles import decode_tile, is_call_str, call_type, is_riichi_discard, normalize_tile
+from .localize import detect_score_class, total_han
 
 ROUND_WIND = {0: "东", 1: "南", 2: "西", 3: "北"}
 
@@ -61,6 +62,8 @@ def parse_ending(end) -> dict:
                 "from": frm,
                 "tsumo": who == frm,        # 自摸: 放铳者=和牌者
                 "yaku": yaku,
+                "score_class": detect_score_class(yaku),  # 满贯/跳满/.../役满 或 None
+                "han": total_han(yaku),                   # 累计番数
             })
             i += 2
         return {"type": "和了", "agaris": agaris}
@@ -104,6 +107,28 @@ def parse_round(raw: list, nplayers: int = 4) -> dict:
         })
 
     ending = parse_ending(raw[16] if len(raw) > 16 else None)
+
+    # 回填每家的"立直归宿": none / won / dealin / draw_tenpai / draw_noten
+    # （仅对 riichi=True 的人有意义，未立直一律 none）
+    for p in players:
+        if not p["riichi"]:
+            p["riichi_outcome"] = "none"
+            continue
+        seat = p["seat"]
+        outcome = "other"  # 立直了但既没和也没放铳，常见于第三家先和
+        if ending["type"] == "和了":
+            for a in ending["agaris"]:
+                if a["who"] == seat:
+                    outcome = "won"
+                    break
+                if (not a["tsumo"]) and a["from"] == seat:
+                    outcome = "dealin"
+                    break
+        elif ending["type"] == "流局":
+            delta = ending.get("delta", [0, 0, 0, 0])
+            outcome = "draw_tenpai" if (seat < len(delta) and delta[seat] > 0) else "draw_noten"
+        # 中途流局: 立直棒留场，记为 other (上层视需要再细分)
+        p["riichi_outcome"] = outcome
 
     return {
         "round_code": round_code,
