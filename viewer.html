@@ -52,6 +52,44 @@
   th.sortable.active { color: var(--accent); }
   th.sortable .arrow { display: inline-block; width: 10px; opacity: 0.5; margin-left: 2px; }
   th.sortable.active .arrow { opacity: 1; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+  .tab {
+    background: transparent; color: var(--muted); border: none; border-bottom: 2px solid transparent;
+    padding: 8px 16px; font: inherit; cursor: pointer; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  /* Fetch tab */
+  textarea#urls-input {
+    width: 100%; min-height: 120px; resize: vertical;
+    background: #0d1117; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 10px; font: 13px/1.5 ui-monospace, Menlo, monospace;
+  }
+  textarea#urls-input:focus { outline: none; border-color: var(--accent); }
+  .form-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .form-row label { color: var(--muted); font-size: 12px; }
+  .form-row input[type="number"] {
+    width: 70px; background: #0d1117; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 4px 8px; font: inherit;
+  }
+  #fetch-log {
+    margin-top: 14px; padding: 10px 12px; background: #0d1117; border: 1px solid var(--border);
+    border-radius: 4px; max-height: 320px; overflow-y: auto;
+    font: 12px/1.6 ui-monospace, Menlo, monospace; white-space: pre-wrap;
+  }
+  #fetch-log .line.err { color: var(--bad); }
+  #fetch-log .line.ok { color: var(--good); }
+  .games-list { font-size: 12.5px; }
+  .games-list tr td { padding: 5px 9px; }
+  .games-list .actions button { padding: 2px 8px; font-size: 11px; margin-left: 4px; }
+  .login-status { font-size: 12px; color: var(--muted); margin-left: 8px; }
+  .login-status.ok { color: var(--good); }
+  .login-status.warn { color: var(--bad); }
   td:first-child, th:first-child { text-align: left; position: sticky; left: 0; background: var(--panel); }
   tr:hover td { background: rgba(88, 166, 255, 0.05); }
   tr:hover td:first-child { background: var(--panel); }
@@ -64,42 +102,92 @@
 <body>
 <div class="wrap">
   <h1>牌谱统计 viewer</h1>
-  <div class="sub">支持两种输入：① 原始天凤格式牌谱 <code>data/games/*.json</code>（可多选） ② <code>report.py</code> 生成的 <code>report.json</code>。前端实时解析+聚合，无需后端。</div>
+  <div class="sub">本地工具。"统计"看分析结果；"抓取"管理已抓牌谱并从雀魂链接补充新的（需要本地起 server）。</div>
 
-  <div class="toolbar">
-    <label>数据文件</label>
-    <input type="file" id="file" accept=".json,application/json" multiple>
-    <button id="export-btn" style="display:none">导出 report.json</button>
-    <span class="meta-info" id="loaded">未加载</span>
+  <div class="tabs">
+    <button class="tab active" data-tab="stats">📊 统计</button>
+    <button class="tab" data-tab="fetch">🌐 抓取</button>
   </div>
 
-  <div class="toolbar" id="filters" style="display:none">
-    <label>牌谱</label>
-    <select id="game-sel"><option value="__all__">全部</option></select>
-    <label>玩家</label>
-    <select id="player-sel"><option value="__all__">全部</option></select>
-    <label>显示</label>
-    <button id="mode-btn" class="toggle">次数</button>
-    <span class="spacer"></span>
-    <span class="meta-info" id="scope"></span>
+  <!-- ============ 统计 tab ============ -->
+  <div class="tab-pane active" id="tab-stats">
+    <div class="toolbar">
+      <label>数据文件</label>
+      <input type="file" id="file" accept=".json,application/json" multiple>
+      <button id="load-server-btn">加载本地 data/games/*</button>
+      <button id="export-btn" style="display:none">导出 report.json</button>
+      <span class="meta-info" id="loaded">未加载</span>
+    </div>
+
+    <div class="toolbar" id="filters" style="display:none">
+      <label>牌谱</label>
+      <select id="game-sel"><option value="__all__">全部</option></select>
+      <label>玩家</label>
+      <select id="player-sel"><option value="__all__">全部</option></select>
+      <label>显示</label>
+      <button id="mode-btn" class="toggle">次数</button>
+      <span class="spacer"></span>
+      <span class="meta-info" id="scope"></span>
+    </div>
+
+    <div id="content" style="display:none">
+      <h2>总览</h2>
+      <div class="panel"><table id="overview"></table></div>
+
+      <h2>番型 <span class="meta-info" style="font-weight:400;font-size:12px">
+        排序
+        <select id="yaku-sort" style="margin-left:6px">
+          <option value="appearance">出现先后</option>
+          <option value="ratio">占比最大</option>
+          <option value="name">役名字典序</option>
+        </select>
+      </span></h2>
+      <div class="panel"><table id="yaku"></table></div>
+    </div>
+
+    <div id="placeholder" class="empty">先选择 data/games/*.json 或 report.json 文件，或点上方"加载本地 data/games/*"</div>
   </div>
 
-  <div id="content" style="display:none">
-    <h2>总览</h2>
-    <div class="panel"><table id="overview"></table></div>
+  <!-- ============ 抓取 tab ============ -->
+  <div class="tab-pane" id="tab-fetch">
+    <div class="panel" style="padding:16px;margin-bottom:16px">
+      <h2 style="margin-top:0;border-left:none;padding-left:0">从雀魂链接抓取</h2>
 
-    <h2>番型 <span class="meta-info" style="font-weight:400;font-size:12px">
-      排序
-      <select id="yaku-sort" style="margin-left:6px">
-        <option value="appearance">出现先后</option>
-        <option value="ratio">占比最大</option>
-        <option value="name">役名字典序</option>
-      </select>
-    </span></h2>
-    <div class="panel"><table id="yaku"></table></div>
+      <div class="form-row" style="margin-bottom:10px">
+        <button id="login-btn">登录雀魂</button>
+        <span class="login-status" id="login-status">检测中…</span>
+      </div>
+
+      <label class="meta-info">粘贴雀魂分享链接（一行一条，支持多个）</label>
+      <textarea id="urls-input" placeholder="https://game.maj-soul.com/1/?paipu=xxxxx_y&#10;https://game.maj-soul.com/1/?paipu=zzzzz_w"></textarea>
+
+      <div class="form-row">
+        <label>每局间隔(秒)</label>
+        <input type="number" id="delay-min" value="30" min="30">
+        <span class="dim">~</span>
+        <input type="number" id="delay-max" value="120" min="30">
+        <label><input type="checkbox" id="force-refetch"> 已抓过也重抓</label>
+        <span class="spacer"></span>
+        <button id="fetch-btn">开始抓取</button>
+      </div>
+
+      <div class="meta-info" style="margin-top:8px;font-size:11px">
+        ⚠️ 间隔下限 30 秒（封号红线），不可小于。批量几十局以上建议 120~300。
+      </div>
+
+      <div id="fetch-log" style="display:none"></div>
+    </div>
+
+    <div class="panel" style="padding:16px">
+      <div style="display:flex;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0;border-left:none;padding-left:0">本地已抓牌谱</h2>
+        <span class="spacer"></span>
+        <button id="refresh-games-btn">刷新</button>
+        <button id="analyze-all-btn">全部加入分析</button>
+      </div>
+      <div style="overflow-x:auto"><table class="games-list" id="games-list"></table></div>
+    </div>
   </div>
-
-  <div id="placeholder" class="empty">先选择 data/games/*.json 或 report.json 文件（可多选）</div>
 </div>
 
 <script>
@@ -423,6 +511,224 @@
 
   // 暴露解析器到 window，方便外部脚本/对比测试调用（不影响生产功能）
   window.MJAI = { parseGame, buildReport, localize };
+
+  // ---- Tab 切换 ----
+  document.querySelectorAll(".tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b === btn));
+      const target = btn.dataset.tab;
+      document.querySelectorAll(".tab-pane").forEach((p) => {
+        p.classList.toggle("active", p.id === `tab-${target}`);
+      });
+      if (target === "fetch") refreshFetchTab();
+    });
+  });
+
+  function switchTab(name) {
+    const btn = document.querySelector(`.tab[data-tab="${name}"]`);
+    if (btn) btn.click();
+  }
+
+  // ---- server 检测 (URL 是 http://... 时启用 server 功能；file:// 时禁用) ----
+  const HAS_SERVER = location.protocol.startsWith("http");
+  if (!HAS_SERVER) {
+    // 没 server 模式：禁用抓取相关按钮
+    const disable = (id, why) => {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = true; el.title = why; }
+    };
+    disable("load-server-btn", "需要通过 server.py 启动才能用");
+    disable("login-btn", "需要通过 server.py 启动");
+    disable("fetch-btn", "需要通过 server.py 启动");
+    disable("refresh-games-btn", "需要通过 server.py 启动");
+    disable("analyze-all-btn", "需要通过 server.py 启动");
+  }
+
+  async function api(path, opts = {}) {
+    const r = await fetch(path, opts);
+    const ct = r.headers.get("Content-Type") || "";
+    if (!r.ok) {
+      const msg = ct.includes("json") ? (await r.json()).error : await r.text();
+      throw new Error(msg || `HTTP ${r.status}`);
+    }
+    return ct.includes("json") ? r.json() : r.text();
+  }
+
+  // ---- 加载本地 data/games/* (走 server) ----
+  document.getElementById("load-server-btn").addEventListener("click", async () => {
+    if (!HAS_SERVER) return;
+    try {
+      const { games } = await api("/api/games");
+      if (!games.length) { alert("data/games/ 里没有任何牌谱。先去抓取 tab 抓几局。"); return; }
+      const srcs = await Promise.all(games.map(g => api(`/api/games/raw?ref=${encodeURIComponent(g.ref)}`)));
+      const parsed = srcs.map(s => parseGame(s));
+      DATA = buildReport(parsed);
+      onLoaded(`本地 ${games.length} 场（server 加载）`);
+    } catch (e) {
+      alert("加载失败: " + e.message);
+    }
+  });
+
+  // ---- 抓取 tab 状态 ----
+  async function refreshFetchTab() {
+    if (!HAS_SERVER) {
+      document.getElementById("login-status").textContent = "未启用 server（双击启动.command/启动.bat 才能抓）";
+      document.getElementById("login-status").classList.add("warn");
+      renderGamesList([]);
+      return;
+    }
+    try {
+      const st = await api("/api/status");
+      const ls = document.getElementById("login-status");
+      if (st.logged_in) {
+        ls.textContent = "✅ 已登录";
+        ls.className = "login-status ok";
+      } else {
+        ls.textContent = "❌ 未登录（点左侧按钮去登）";
+        ls.className = "login-status warn";
+      }
+    } catch (e) {
+      document.getElementById("login-status").textContent = "无法连接 server";
+    }
+    refreshGamesList();
+  }
+
+  async function refreshGamesList() {
+    if (!HAS_SERVER) return;
+    try {
+      const { games } = await api("/api/games");
+      renderGamesList(games);
+    } catch (e) {
+      renderGamesList([]);
+    }
+  }
+
+  function renderGamesList(games) {
+    const tbl = document.getElementById("games-list");
+    if (!games.length) {
+      tbl.innerHTML = `<tbody><tr><td class="dim">暂无已抓牌谱</td></tr></tbody>`;
+      return;
+    }
+    const fmtDate = (ts) => new Date(ts * 1000).toLocaleString();
+    const fmtSize = (b) => b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`;
+    const head = `<thead><tr><th style="text-align:left">牌谱 ID</th><th>大小</th><th>抓取时间</th><th></th></tr></thead>`;
+    const body = "<tbody>" + games.map(g => `
+      <tr>
+        <td style="text-align:left;font-family:ui-monospace,Menlo,monospace">${escapeHTML(g.ref)}</td>
+        <td>${fmtSize(g.size)}</td>
+        <td>${fmtDate(g.mtime)}</td>
+        <td class="actions">
+          <button data-act="analyze" data-ref="${escapeHTML(g.ref)}">分析此局</button>
+          <button data-act="delete" data-ref="${escapeHTML(g.ref)}">删除</button>
+        </td>
+      </tr>
+    `).join("") + "</tbody>";
+    tbl.innerHTML = head + body;
+
+    tbl.onclick = async (e) => {
+      const btn = e.target.closest("button[data-act]");
+      if (!btn) return;
+      const ref = btn.dataset.ref;
+      if (btn.dataset.act === "delete") {
+        if (!confirm(`删除 ${ref} ?`)) return;
+        try { await api(`/api/games/${encodeURIComponent(ref)}`, { method: "DELETE" }); refreshGamesList(); }
+        catch (err) { alert(err.message); }
+      } else if (btn.dataset.act === "analyze") {
+        try {
+          const src = await api(`/api/games/raw?ref=${encodeURIComponent(ref)}`);
+          DATA = buildReport([parseGame(src)]);
+          onLoaded(`${ref}（server 加载）`);
+          switchTab("stats");
+        } catch (err) {
+          alert("分析失败: " + err.message);
+        }
+      }
+    };
+  }
+
+  document.getElementById("refresh-games-btn")?.addEventListener("click", refreshGamesList);
+
+  document.getElementById("analyze-all-btn")?.addEventListener("click", async () => {
+    if (!HAS_SERVER) return;
+    try {
+      const { games } = await api("/api/games");
+      if (!games.length) { alert("没有牌谱"); return; }
+      const srcs = await Promise.all(games.map(g => api(`/api/games/raw?ref=${encodeURIComponent(g.ref)}`)));
+      DATA = buildReport(srcs.map(parseGame));
+      onLoaded(`本地 ${games.length} 场（server 加载）`);
+      switchTab("stats");
+    } catch (e) { alert(e.message); }
+  });
+
+  // ---- 登录 ----
+  document.getElementById("login-btn")?.addEventListener("click", async () => {
+    if (!HAS_SERVER) return;
+    try {
+      await api("/api/login", { method: "POST" });
+      const ok = confirm("已开新窗口登录雀魂。完成登录后回来这里点'确定'保存登录态。");
+      if (ok) {
+        await api("/api/login/done", { method: "POST" });
+      }
+      setTimeout(refreshFetchTab, 500);
+    } catch (e) { alert(e.message); }
+  });
+
+  // ---- 抓取 ----
+  document.getElementById("fetch-btn")?.addEventListener("click", async () => {
+    if (!HAS_SERVER) return;
+    const text = document.getElementById("urls-input").value.trim();
+    const urls = text.split(/\s+/).filter(Boolean);
+    if (!urls.length) { alert("请粘贴至少一条链接"); return; }
+    const delay_min = Number(document.getElementById("delay-min").value);
+    const delay_max = Number(document.getElementById("delay-max").value);
+    const force = document.getElementById("force-refetch").checked;
+    if (delay_min < 30) { alert("下限不能小于 30 秒"); return; }
+
+    const log = document.getElementById("fetch-log");
+    log.style.display = "";
+    log.innerHTML = "";
+    const append = (cls, text) => {
+      const div = document.createElement("div");
+      div.className = `line ${cls || ""}`;
+      div.textContent = text;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    };
+
+    const btn = document.getElementById("fetch-btn");
+    btn.disabled = true; btn.textContent = "抓取中…";
+
+    try {
+      await api("/api/fetch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls, delay_min, delay_max, force }),
+      });
+      append("", `🚀 任务已提交，${urls.length} 条 URL`);
+
+      const es = new EventSource("/api/fetch/stream");
+      es.addEventListener("log", (e) => append("", JSON.parse(e.data)));
+      es.addEventListener("progress", (e) => {
+        const p = JSON.parse(e.data);
+        append("", `   进度 ${p.index}/${p.total}: ${p.pid}`);
+      });
+      es.addEventListener("done", (e) => {
+        const r = JSON.parse(e.data);
+        if (r.ok) append("ok", `✅ 全部完成（成功 ${r.wrote?.length || 0}）`);
+        else append("err", `⚠️ 完成（成功 ${r.wrote?.length || 0}，失败 ${r.failed?.length || 0}）`);
+        es.close();
+        btn.disabled = false; btn.textContent = "开始抓取";
+        refreshGamesList();
+      });
+      es.onerror = () => { es.close(); btn.disabled = false; btn.textContent = "开始抓取"; };
+    } catch (e) {
+      append("err", "❌ " + e.message);
+      btn.disabled = false; btn.textContent = "开始抓取";
+    }
+  });
+
+  // 启动时检测一次 server
+  if (HAS_SERVER) refreshFetchTab();
 
   // ============================================================
   // 以下是原本就有的展示层逻辑（筛选/聚合/渲染）
