@@ -4,30 +4,33 @@
 
 ## 它能做什么
 
-1. **抓取**：给一条雀魂分享链接，自动从浏览器拉出**天凤格式 json**（4 玩家、整局牌谱、点数等）
-2. **统计**：把抓到的若干局喂给 `stats.py`，按玩家累积出顺位、和了率、放铳率、立直率、副露率、平均打点、立直收支、亲和率、连庄数、打点分布等指标
-3. **报告**：用 `report.py` 把若干场牌谱聚合成事实粒度 JSON，浏览器打开 `viewer.html` 看板查阅。支持牌谱/玩家筛选、次数↔比例切换、表头点击排序、番型表多种排序
+1. **抓取**：粘一条雀魂分享链接（"雀魂牌谱:..." / "https://..." / "paipu=..." / 裸 ID 都吃），从浏览器拉出**天凤格式 json**（喂下游 mjai-reviewer/NAGA）+ **雀魂中间态 json**（含完整事件流）
+2. **浏览器 UI** (`server.py` + `viewer.html`)：登录雀魂、批量抓取（实时进度）、本地牌谱列表多选、改保存位置——全程零命令行
+3. **统计/报告**：按玩家维度的总览表（顺位、和了/放铳/立直/副露率、平均打点 + **单次最高赢/放铳/被自摸**、立直收支、亲和率、连庄数、打点分布）；番型表（行=役、列=玩家，次数↔比例）；**番型先达成榜**（每行一种番型，🥇 + 第几局/第几场/日麻局名/时间，支持有副露/无副露过滤）
+4. **打包发布** (GitHub Actions)：push tag v* 自动出 mac arm64 + Win x64 的双击即用 zip，朋友不装环境也能用
 
 不做：单局逐手 AI 复盘（那是 mjai-reviewer / NAGA 的事，可以拿本工具产出的 json 直接喂它们）。
 
 ## 流程总览
 
 ```
-雀魂分享链接
-     │
-     ▼   fetch.py
-Playwright 控制 Chromium → 注入 inject.js（vendored 解码内核）
-     → hook WebSocket → 截 fetchGameRecord 帧 → 调 decoder
-     │
-     ▼
-data/games/<paipu_id>.json    （天凤格式，下游 mjai-reviewer/NAGA 也吃这个）
-     │
-     ├─→  stats.py                          → 终端 markdown 输出（玩家级聚合）
-     │
-     └─→  report.py  →  report.json         事实粒度 JSON（每场/每局/每和/每役）
-                              │
-                              ▼   双击打开 viewer.html，文件选择器加载
-                       浏览器看板（前端实时聚合，可任意切筛选/模式）
+                                      浏览器 UI（登录/抓取/管理）
+                                              │
+       命令行 fetch.py ──────┐                ▼
+                              ├──→  src/fetcher（Playwright + inject.js 解码内核）
+                              │                │
+                              │                ▼
+                              │     data/games/*.json (天凤格式, 喂下游 AI)
+                              │     data/raw/*.json   (雀魂中间态, 含事件流 + 时间戳)
+                              │                │
+                              │                ▼
+                              │     stats.py (终端 md)  /  report.py → report.json
+                              │                                │
+                              │                                ▼
+                              └────→ viewer.html 浏览器看板
+                                     - 双源加载: 原始天凤 json 多选 / report.json
+                                     - 总览 / 番型 / 番型先达成榜
+                                     - 牌谱、玩家筛选, 次数↔比例切换, 表头排序
 ```
 
 ## 目录结构
@@ -53,11 +56,17 @@ data/games/<paipu_id>.json    （天凤格式，下游 mjai-reviewer/NAGA 也吃
 │   └── reporter/
 │       └── datafile.py      parsed games → viewer 用的事实粒度 JSON
 │
-├── viewer.html              浏览器看板（无依赖，文件选择器读 report.json）
+├── viewer.html              浏览器看板（无依赖，可加载原始天凤 json 或 report.json）
 ├── report.py                生成 report.json
+├── server.py                本地 HTTP server（端口 9233），驱动 viewer 的抓取/管理 UI
+├── 启动.command / 启动.bat  双击启动入口，自动检测/装依赖 + 起 server
+├── build.py + mjai-tool.spec PyInstaller 打包脚本（产 dist/mjai-tool/, ~500MB）
+│
+├── .github/workflows/
+│   └── release.yml          push tag v* 触发，CI 出 mac arm64 + Win x64 zip 挂 Release
 │
 ├── inject/                  注入到雀魂页的解码器（TS + esbuild）
-│   ├── src/entry.ts         唯一自写的 JS：把解码 API 暴露到 window.__majDecoder
+│   ├── src/entry.ts         唯一自写的 JS：把 toTenhou/toMajsoul/decode 暴露到 window.__majDecoder
 │   ├── package.json
 │   └── dist/inject.js       构建产物（gitignore，由 npm run build 生成）
 │
@@ -66,8 +75,9 @@ data/games/<paipu_id>.json    （天凤格式，下游 mjai-reviewer/NAGA 也吃
 │                            来源：https://github.com/kbkn3/MahjongSoul-review-supporter v1.5.1
 │                            许可：Apache-2.0（见 vendored/kbkn3/LICENSE 与 NOTICE.md）
 │
-├── data/                    运行产生的数据（全部 gitignore）
-│   ├── games/               天凤 json 落盘到这里
+├── data/                    运行产生的数据（全部 gitignore；frozen 模式落到 ~/.mjai-tool/）
+│   ├── games/               天凤格式 json，喂下游 mjai-reviewer/NAGA
+│   ├── raw/                 雀魂中间态 json（kbkn3 decoder 输出，含完整事件流 + 时间戳）
 │   └── profile/             Playwright 持久化登录态（chmod 700）
 │
 ├── docs/
@@ -119,6 +129,23 @@ python3 -m playwright install chromium
 
 # JS 端：构建 inject.js（约 3.9MB IIFE）
 cd inject && npm install && npm run build && cd -
+```
+
+> 不想手敲？直接跑 `python3 server.py`（或双击 `启动.command` / `启动.bat`），启动脚本会自动检测、缺啥装啥（包括 `npm run build inject`）。
+
+## 自己出预编译包（可选）
+
+```bash
+python3 build.py    # 产 dist/mjai-tool/, ~500MB，里面带 chromium
+./dist/mjai-tool/mjai-tool   # 直接跑（mac）
+```
+
+GitHub Actions 已配置为 push tag v* 自动构建：
+
+```bash
+git tag -a v0.x.0 -m "新版本说明"
+git push origin v0.x.0
+# 等几分钟，去 Releases 页看 mac/win zip
 ```
 
 ## 使用
