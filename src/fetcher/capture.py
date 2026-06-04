@@ -8,6 +8,7 @@
 from __future__ import annotations
 import base64
 import os
+import tempfile
 import time
 from pathlib import Path
 from playwright.sync_api import BrowserContext, WebSocket
@@ -18,9 +19,12 @@ _RESPONSE_TYPE = 0x03      # 服务端对客户端请求的响应
 # 雀魂帧首 3 字节：type(1) + index(2 LE)
 # fetchGameRecord 是 Lobby 上的请求-响应
 
-# 调试模式：环境变量 MAJ_DUMP_FRAMES=1 时把抓到的帧写到 /tmp 供分析
+# 调试模式：环境变量 MAJ_DUMP_FRAMES=1 时把抓到的帧 dump 到临时目录供分析
+# 跨平台用 tempfile.gettempdir()(mac/linux=/tmp, win=%TEMP%)
+_TMP_ROOT = Path(tempfile.gettempdir())
 _DUMP = os.environ.get("MAJ_DUMP_FRAMES") == "1"
-_DUMP_DIR = Path("/tmp/maj-frames")
+_DUMP_DIR = _TMP_ROOT / "maj-frames"
+_LAST_CAPTURED_PATH = _TMP_ROOT / "maj-last-captured.bin"
 
 
 def _index_of_frame(frame_bytes: bytes) -> int:
@@ -112,9 +116,14 @@ def fetch_record(
             "请确认：① 已登录 ② URL 正确 ③ 雀魂 Unity 加载完成（首次开窗可能要 30-60s）"
         )
 
-    # 抓到了：把帧落到 /tmp，方便事后离线分析
-    fail_dump = Path("/tmp/maj-last-captured.bin")
-    fail_dump.write_bytes(cap.captured)
+    # 抓到了：把帧落到临时目录，方便事后离线分析。dump 失败别让主流程崩
+    # （比如临时目录权限问题、磁盘满），只是调试存档而已
+    saved_to = None
+    try:
+        _LAST_CAPTURED_PATH.write_bytes(cap.captured)
+        saved_to = _LAST_CAPTURED_PATH
+    except OSError:
+        pass
 
     b64 = base64.b64encode(cap.captured).decode("ascii")
     try:
@@ -122,9 +131,9 @@ def fetch_record(
             "(b64) => window.__majDecoder.decode(b64)", b64
         )
     except Exception as e:
+        hint = f"原始帧已保存到 {saved_to}" if saved_to else "原始帧 dump 失败"
         raise RuntimeError(
-            f"decoder 解码失败: {e}. "
-            f"原始帧已保存到 {fail_dump} ({len(cap.captured)} 字节)，请离线分析。"
+            f"decoder 解码失败: {e}. {hint} ({len(cap.captured)} 字节)，请离线分析。"
         ) from e
     page.close()
     return result
