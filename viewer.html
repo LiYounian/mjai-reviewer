@@ -148,9 +148,10 @@
       <div class="panel"><table id="yaku"></table></div>
 
       <h2>番型先达成榜
-        <span class="meta-info" style="font-weight:400;font-size:12px">
-          按"该玩家累计参与的第几局"排名；同对局内 (round_code, honba) 升序，跨对局按 start_time。
-          🥇 该役最早达成的玩家。
+        <span class="meta-info" style="font-weight:400;font-size:12px;margin-left:8px">
+          每行一种番型，按最早达成顺序排序。
+          🥇 = 拿到该役"首胡奖"的玩家。
+          "第 N 局" = 该玩家个人累计参与的第几局。
         </span>
       </h2>
       <div class="panel"><table id="yaku-first"></table></div>
@@ -1309,13 +1310,15 @@
   // 算法:
   //   1. 把所有局排成时间序: 跨场按 start_time, 同场按 (round_code, honba)
   //   2. 对每位玩家维护 "他个人累计参与的第几局" 计数器 nth
-  //   3. 扫序列, 看到某局 X 时, 凡参与 X 的玩家 nth+=1; 若 X 为该玩家和了局,
-  //      记下他每个役的"首次达成"= 当前 nth + 局信息
-  //   4. 表格行=役、列=玩家, cell 显示 "第N局 (东2局1本场)"; 该役全场最快达成的格高亮
-  // 全部玩家维度 — 所以无视 selectedPlayer (单选玩家时这表只剩一列没意义)
+  //   3. 扫序列时:
+  //        - 参与该局的玩家 nth+=1
+  //        - 该局每条和了, 把胡牌玩家"该役的首次达成"记下: nth + 局信息
+  //        - 该役"在该范围内的总出现次数"也累加
+  //   4. 表格每行一种役, 4 列: 役 / 总达成次数 / 最先达成者 / 达成位置(第N局+牌谱+局名)
+  //   5. 行按 "最早达成的 nth" 升序排 (常见役排前)
+  // 注意: 单玩家筛选 (player-sel) 不影响这表 — 显示全玩家比较才有意义
   // ============================================================
   function aggregateYakuFirst(games) {
-    // 把每局展开成事件, 排序键 (start_time, round_code, honba)。同 key 退到 ref 字典序保稳定
     const events = [];
     games.forEach((g) => {
       const t = g.start_time ?? 0;
@@ -1327,7 +1330,6 @@
           honba: r.honba ?? 0,
           gameLabel: g.label,
           roundName: r.round_name,
-          honbaIdx: r.honba ?? 0,
           players: r.players.map((p) => p.name),
           agaris: r.agaris || [],
         });
@@ -1341,92 +1343,80 @@
     );
 
     const nthByPlayer = {};
-    const firstHit = {}; // {yakuName: {playerName: {nth, gameLabel, roundName, honba}}}
-    const huleCount = {}; // {playerName: 总和了数 (用来给表头显示)}
+    // {yakuName: { firstWinner, firstNth, firstPlace, totalCount, eventOrder }}
+    // eventOrder = 这个役在事件流里第一次出现的全局序号（事件 index, 用来给"役"排序）
+    const yakuMeta = {};
 
-    events.forEach((e) => {
-      // 1. 参与的玩家 nth+=1
+    events.forEach((e, eventIdx) => {
       e.players.forEach((p) => { nthByPlayer[p] = (nthByPlayer[p] || 0) + 1; });
-      // 2. 该局每条和了 → 记录役达成
+
       e.agaris.forEach((a) => {
         const w = a.who_name;
         if (!w) return;
-        huleCount[w] = (huleCount[w] || 0) + 1;
         // 同一和了里同役只算一次
         const seen = new Set();
         a.yaku.forEach((y) => {
           if (seen.has(y.name)) return;
           seen.add(y.name);
-          if (!firstHit[y.name]) firstHit[y.name] = {};
-          if (!firstHit[y.name][w]) {
-            firstHit[y.name][w] = {
-              nth: nthByPlayer[w],
-              gameLabel: e.gameLabel,
-              roundName: e.roundName,
-              honba: e.honbaIdx,
-              startTime: e.startTime,
+          if (!yakuMeta[y.name]) {
+            yakuMeta[y.name] = {
+              totalCount: 0,
+              firstWinner: w,
+              firstNth: nthByPlayer[w],
+              firstGameLabel: e.gameLabel,
+              firstRoundName: e.roundName,
+              firstHonba: e.honba,
+              firstStartTime: e.startTime,
+              eventOrder: eventIdx,
             };
           }
+          yakuMeta[y.name].totalCount += 1;
         });
       });
     });
 
-    return { firstHit, huleCount, allPlayers: Object.keys(nthByPlayer).sort() };
+    return yakuMeta;
   }
 
   function renderYakuFirst(games) {
     const tbl = $("yaku-first");
-    tbl.classList.add("yaku-first");
     if (!games.length) {
       tbl.innerHTML = '<tbody><tr><td class="dim">无数据</td></tr></tbody>';
       return;
     }
-    const { firstHit, huleCount, allPlayers } = aggregateYakuFirst(games);
-    const yakuList = Object.keys(firstHit);
+    const meta = aggregateYakuFirst(games);
+    const yakuList = Object.keys(meta);
     if (!yakuList.length) {
       tbl.innerHTML = '<tbody><tr><td class="dim">没有任何和了</td></tr></tbody>';
       return;
     }
 
-    // 役按"任一玩家最早达成的 nth 升序"排（更先达成的役排前面）
-    const earliestByYaku = {};
-    yakuList.forEach((y) => {
-      let m = Infinity;
-      Object.values(firstHit[y]).forEach((rec) => { if (rec.nth < m) m = rec.nth; });
-      earliestByYaku[y] = m;
-    });
-    yakuList.sort((a, b) => (earliestByYaku[a] - earliestByYaku[b]) || a.localeCompare(b, "zh"));
+    // 行按"最早达成"升序：先比 firstNth (累计第几局)，再比 eventOrder (事件流序)。
+    // 这样常见役（立直/断幺九/宝牌）会排在前面，七对子/小三元等罕见役排后。
+    yakuList.sort((a, b) =>
+      (meta[a].firstNth - meta[b].firstNth) ||
+      (meta[a].eventOrder - meta[b].eventOrder) ||
+      a.localeCompare(b, "zh")
+    );
 
-    // 表头: 役 + 每个玩家
     const head = `<thead><tr>
-      <th style="text-align:left">役</th>
-      ${allPlayers.map(p => `<th>${escapeHTML(p)}<div class="dim" style="font-weight:400">${huleCount[p] || 0} 和</div></th>`).join("")}
+      <th style="text-align:left">番型</th>
+      <th>总达成</th>
+      <th style="text-align:left">🥇 最先达成者</th>
+      <th style="text-align:left">达成位置</th>
     </tr></thead>`;
 
     const body = "<tbody>" + yakuList.map((y) => {
-      // 找该役的最快达成者 (按 nth, 同 nth 谁先按 startTime 排)
-      const rows = firstHit[y];
-      const champions = new Set();
-      const fastest = earliestByYaku[y];
-      Object.entries(rows).forEach(([p, rec]) => {
-        if (rec.nth === fastest) champions.add(p);
-      });
-
-      const cells = [`<td>${escapeHTML(y)}</td>`];
-      allPlayers.forEach((p) => {
-        const rec = rows[p];
-        if (!rec) {
-          cells.push('<td class="dim">·</td>');
-          return;
-        }
-        const isChamp = champions.has(p);
-        const honbaSuffix = rec.honba > 0 ? `${rec.honba}本场` : "";
-        const place = `${rec.gameLabel} ${rec.roundName}${honbaSuffix}`;
-        const cls = isChamp ? "gold" : "";
-        cells.push(`<td class="${cls}">${isChamp ? "🥇 " : ""}第 ${rec.nth} 局<span class="when">${escapeHTML(place)}</span></td>`);
-      });
-      return cells.join("");
-    }).join("\n") + "</tbody>";
+      const m = meta[y];
+      const honbaSuffix = m.firstHonba > 0 ? ` ${m.firstHonba}本场` : "";
+      const place = `${m.firstGameLabel} ${m.firstRoundName}${honbaSuffix}`;
+      return `<tr>
+        <td style="text-align:left">${escapeHTML(y)}</td>
+        <td>${m.totalCount}</td>
+        <td style="text-align:left" class="gold">🥇 ${escapeHTML(m.firstWinner)}</td>
+        <td style="text-align:left">第 ${m.firstNth} 局 <span class="dim">· ${escapeHTML(place)}</span></td>
+      </tr>`;
+    }).join("") + "</tbody>";
 
     tbl.innerHTML = head + body;
   }
