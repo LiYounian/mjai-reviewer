@@ -55,23 +55,38 @@ def step_inject():
 def _ensure_kbkn3_node_modules():
     """让 vendored/kbkn3/node_modules 指向 inject/node_modules。
 
-    平台行为:
-      - mac/linux: 重建符号链接（指向 ../../inject/node_modules）
-      - Windows: 也用 dir junction（os.symlink target_is_directory=True）；
-        若没权限就 fallback 复制（最坏 100MB 拷贝，但 CI 上不在乎）。
+    Windows checkout 后这条路径可能是个"无效 symlink 占位符":
+    既不是真目录也不是普通文件，连 is_dir()/is_symlink() 调用都因
+    Access is denied 抛 PermissionError。所以先无脑尝试各种删除方式，
+    哪种成功就用哪种，全失败再 raise。
     """
     target_rel = Path("..") / ".." / "inject" / "node_modules"
     link_path = ROOT / "vendored" / "kbkn3" / "node_modules"
 
-    if not (ROOT / "inject" / "node_modules").exists():
+    inject_node_modules = ROOT / "inject" / "node_modules"
+    if not inject_node_modules.exists():
         raise SystemError("inject/node_modules 不存在，npm install 应该先跑")
 
-    # 删除旧的 symlink/文件/目录
-    if link_path.is_symlink() or link_path.exists():
-        if link_path.is_dir() and not link_path.is_symlink():
-            shutil.rmtree(link_path)
+    # 强力清理旧的占位符/链接/目录。Path.is_*() 方法在 Win 死链上会抛
+    # PermissionError，所以走 lexists() (lstat 不 follow link) 判存在性，
+    # 再依次尝试 unlink → rmdir → rmtree。
+    if os.path.lexists(link_path):
+        for attempt in (
+            lambda: link_path.unlink(),
+            lambda: os.rmdir(link_path),
+            lambda: shutil.rmtree(link_path),
+        ):
+            try:
+                attempt()
+                break
+            except (OSError, FileNotFoundError):
+                continue
         else:
-            link_path.unlink()
+            # 还没删掉就最后尝试一次系统命令
+            if IS_WIN:
+                subprocess.run(["cmd", "/c", "rmdir", "/s", "/q", str(link_path)], check=False)
+            if os.path.lexists(link_path):
+                raise SystemError(f"无法删除 {link_path}")
 
     try:
         os.symlink(target_rel, link_path, target_is_directory=True)
@@ -80,7 +95,7 @@ def _ensure_kbkn3_node_modules():
     except (OSError, NotImplementedError) as e:
         # Windows 没开 Developer Mode 时普通用户不能建 symlink
         print(f"   ⚠️  symlink 失败 ({e}), 退回复制")
-        shutil.copytree(ROOT / "inject" / "node_modules", link_path)
+        shutil.copytree(inject_node_modules, link_path)
         print(f"   📋 已复制 node_modules 到 {link_path}")
 
 
