@@ -137,21 +137,14 @@
       <h2>总览</h2>
       <div class="panel"><table id="overview"></table></div>
 
-      <h2>番型 <span class="meta-info" style="font-weight:400;font-size:12px">
-        排序
-        <select id="yaku-sort" style="margin-left:6px">
-          <option value="appearance">出现先后</option>
-          <option value="ratio">占比最大</option>
-          <option value="name">役名字典序</option>
-        </select>
-      </span></h2>
+      <h2>番型</h2>
       <div class="panel"><table id="yaku"></table></div>
 
       <h2>番型先达成榜
         <span class="meta-info" style="font-weight:400;font-size:12px;margin-left:8px">
-          每行一种番型，按最早达成顺序排序。
-          🥇 = 拿到该役"首胡奖"的玩家。
-          "第 N 局" = 该玩家个人累计参与的第几局。
+          每行一种番型。🥇 = 该役"首胡奖"得主。
+          "第几局" = 该玩家个人累计参与的第几局；"第几场" = 牌谱编号。
+          "东1-2" 表示东风场1局2连庄。
         </span>
       </h2>
       <div class="panel"><table id="yaku-first"></table></div>
@@ -951,7 +944,6 @@
 
     gameSel.addEventListener("change", refresh);
     playerSel.addEventListener("change", refresh);
-    $("yaku-sort").addEventListener("change", refresh);
     $("mode-btn").addEventListener("click", () => {
       MODE = MODE === "count" ? "ratio" : "count";
       $("mode-btn").textContent = MODE === "count" ? "次数" : "比例";
@@ -1262,25 +1254,8 @@
     const allYaku = new Set();
     players.forEach((p) => Object.keys(yaku[p]).forEach((y) => allYaku.add(y)));
 
-    const sortMode = $("yaku-sort").value;
-    const maxRatio = (y) => {
-      let m = 0;
-      players.forEach((p) => {
-        const h = hule[p] || 0;
-        if (h) m = Math.max(m, (yaku[p][y] || 0) / h);
-      });
-      return m;
-    };
-    const cmp = {
-      // 默认：按筛选范围内第一次出现的顺序
-      appearance: (a, b) => (firstSeen[a] ?? 0) - (firstSeen[b] ?? 0),
-      // 各玩家中最高占比降序，并列再按字典序
-      ratio: (a, b) => (maxRatio(b) - maxRatio(a)) || a.localeCompare(b, "zh"),
-      // 役名字典序(中文按拼音/笔画走 localeCompare 的 zh collation)
-      name: (a, b) => a.localeCompare(b, "zh"),
-    }[sortMode] || ((a, b) => 0);
-
-    const yakuList = Array.from(allYaku).sort(cmp);
+    // 字典序 (中文按 localeCompare 的 zh collation)
+    const yakuList = Array.from(allYaku).sort((a, b) => a.localeCompare(b, "zh"));
 
     const ratio = MODE === "ratio";
     const headerCells = ["役"].concat(players.map((p) => `${escapeHTML(p)}<div class="dim" style="font-weight:400">${hule[p]||0} 和</div>`));
@@ -1401,20 +1376,29 @@
 
     const head = `<thead><tr>
       <th style="text-align:left">番型</th>
-      <th>总达成</th>
       <th style="text-align:left">🥇 最先达成者</th>
-      <th style="text-align:left">达成位置</th>
+      <th>第几局</th>
+      <th style="text-align:left">第几场</th>
+      <th>日麻局名</th>
+      <th style="text-align:left">时间</th>
     </tr></thead>`;
 
     const body = "<tbody>" + yakuList.map((y) => {
       const m = meta[y];
-      const honbaSuffix = m.firstHonba > 0 ? ` ${m.firstHonba}本场` : "";
-      const place = `${m.firstGameLabel} ${m.firstRoundName}${honbaSuffix}`;
+      // 日麻局名简写: "东1局" + honba=2 -> "东1-2"
+      // honba=0 时不带连庄数, 直接 "东1"
+      const wind = (m.firstRoundName || "").replace(/局.*/, "");  // "东1"
+      const tag = m.firstHonba > 0 ? `${wind}-${m.firstHonba}` : wind;
+      const dateStr = m.firstStartTime
+        ? new Date(m.firstStartTime * 1000).toLocaleString("zh-CN", { hour12: false })
+        : "-";
       return `<tr>
         <td style="text-align:left">${escapeHTML(y)}</td>
-        <td>${m.totalCount}</td>
         <td style="text-align:left" class="gold">🥇 ${escapeHTML(m.firstWinner)}</td>
-        <td style="text-align:left">第 ${m.firstNth} 局 <span class="dim">· ${escapeHTML(place)}</span></td>
+        <td>${m.firstNth}</td>
+        <td style="text-align:left">${escapeHTML(m.firstGameLabel)}</td>
+        <td>${escapeHTML(tag)}</td>
+        <td style="text-align:left" class="dim">${escapeHTML(dateStr)}</td>
       </tr>`;
     }).join("") + "</tbody>";
 
