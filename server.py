@@ -333,10 +333,21 @@ class Handler(BaseHTTPRequestHandler):
         for f in sorted(get_games_dir().glob("*.json")):
             try:
                 st = f.stat()
+                # 尝试从对应 raw json 读 head.start_time（雀魂服务器记录，最准）
+                start_time = None
+                raw_path = get_raw_dir() / f"{f.stem}.json"
+                if raw_path.exists():
+                    try:
+                        with raw_path.open(encoding="utf-8") as rf:
+                            raw = json.load(rf)
+                        start_time = raw.get("head", {}).get("start_time")
+                    except Exception:
+                        pass
                 items.append({
                     "ref": f.stem,
                     "size": st.st_size,
                     "mtime": st.st_mtime,
+                    "start_time": start_time,  # Unix 秒, 没 raw 时为 null
                 })
             except Exception:
                 pass

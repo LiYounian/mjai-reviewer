@@ -97,6 +97,9 @@
   .neg { color: var(--bad); }
   .dim { color: var(--muted); }
   .empty { color: var(--muted); padding: 30px; text-align: center; }
+  /* 先达成榜：金牌格 */
+  .gold { color: var(--good); font-weight: 600; }
+  .yaku-first .when { font-size: 11px; color: var(--muted); display: block; margin-top: 1px; }
 </style>
 </head>
 <body>
@@ -143,6 +146,14 @@
         </select>
       </span></h2>
       <div class="panel"><table id="yaku"></table></div>
+
+      <h2>番型先达成榜
+        <span class="meta-info" style="font-weight:400;font-size:12px">
+          按"该玩家累计参与的第几局"排名；同对局内 (round_code, honba) 升序，跨对局按 start_time。
+          🥇 该役最早达成的玩家。
+        </span>
+      </h2>
+      <div class="panel"><table id="yaku-first"></table></div>
     </div>
 
     <div id="placeholder" class="empty">先选择 data/games/*.json 或 report.json 文件，或点上方"加载本地 data/games/*"</div>
@@ -493,6 +504,7 @@
         }
         return {
           round_name: r.round_name,
+          round_code: r.round_code,  // 4*场风+局数, 跨场排序用
           honba: r.honba,
           dealer_seat: r.dealer_seat,
           ending_type: r.ending.type,
@@ -500,12 +512,28 @@
           players, agaris,
         };
       });
+      // start_time: 优先用 g._start_time (server 加载时附加, 来自 raw head.start_time, 最准),
+      // fallback 解析天凤 title[1] (字符串日期格式), 再不行用 ref 前缀 YYMMDD 当占位
+      let startTime = g._start_time ?? null;
+      if (startTime == null && Array.isArray(g.title) && g.title[1]) {
+        const t = Date.parse(g.title[1]);
+        if (!isNaN(t)) startTime = Math.floor(t / 1000);
+      }
+      if (startTime == null && refPrefix && /^\d{6}$/.test(refPrefix)) {
+        // 260530 -> 2026-05-30 00:00 当下界, 排序稳但不准
+        const yy = +refPrefix.slice(0, 2);
+        const mm = +refPrefix.slice(2, 4);
+        const dd = +refPrefix.slice(4, 6);
+        const t = Date.UTC(2000 + yy, mm - 1, dd);
+        if (!isNaN(t)) startTime = Math.floor(t / 1000);
+      }
       return {
         ref, label,
         title: g.title,
         rule_disp: localize((g.rule || {}).disp || ""),
         names: g.names,
         nplayers: g.nplayers,
+        start_time: startTime,
         final, rounds,
       };
     });
@@ -568,7 +596,12 @@
       const { games } = await api("/api/games");
       if (!games.length) { alert("data/games/ 里没有任何牌谱。先去抓取 tab 抓几局。"); return; }
       const srcs = await Promise.all(games.map(g => api(`/api/games/raw?ref=${encodeURIComponent(g.ref)}`)));
-      const parsed = srcs.map(s => parseGame(s));
+      const parsed = srcs.map((s, i) => {
+        const g = parseGame(s);
+        // 用 server 提供的 start_time（来自 raw head.start_time, 最准）覆盖
+        if (games[i].start_time != null) g._start_time = games[i].start_time;
+        return g;
+      });
       DATA = buildReport(parsed);
       onLoaded(`本地 ${games.length} 场（server 加载）`);
     } catch (e) {
@@ -736,7 +769,15 @@
     if (!refs.length) { alert("没有勾选任何牌谱"); return; }
     try {
       const srcs = await Promise.all(refs.map(ref => api(`/api/games/raw?ref=${encodeURIComponent(ref)}`)));
-      DATA = buildReport(srcs.map(parseGame));
+      // _GAMES_CACHE 里有 server 提供的 start_time
+      const startTimeByRef = Object.fromEntries(_GAMES_CACHE.map(g => [g.ref, g.start_time]));
+      const parsed = srcs.map((s, i) => {
+        const g = parseGame(s);
+        const st = startTimeByRef[refs[i]];
+        if (st != null) g._start_time = st;
+        return g;
+      });
+      DATA = buildReport(parsed);
       onLoaded(`选中 ${refs.length} 场（server 加载）`);
       switchTab("stats");
     } catch (e) { alert(e.message); }
@@ -1263,6 +1304,133 @@
       "<tbody>" + rows.map((r) => `<tr>${r}</tr>`).join("") + "</tbody>";
   }
 
+  // ============================================================
+  // 番型先达成榜
+  // 算法:
+  //   1. 把所有局排成时间序: 跨场按 start_time, 同场按 (round_code, honba)
+  //   2. 对每位玩家维护 "他个人累计参与的第几局" 计数器 nth
+  //   3. 扫序列, 看到某局 X 时, 凡参与 X 的玩家 nth+=1; 若 X 为该玩家和了局,
+  //      记下他每个役的"首次达成"= 当前 nth + 局信息
+  //   4. 表格行=役、列=玩家, cell 显示 "第N局 (东2局1本场)"; 该役全场最快达成的格高亮
+  // 全部玩家维度 — 所以无视 selectedPlayer (单选玩家时这表只剩一列没意义)
+  // ============================================================
+  function aggregateYakuFirst(games) {
+    // 把每局展开成事件, 排序键 (start_time, round_code, honba)。同 key 退到 ref 字典序保稳定
+    const events = [];
+    games.forEach((g) => {
+      const t = g.start_time ?? 0;
+      g.rounds.forEach((r) => {
+        events.push({
+          startTime: t,
+          ref: g.ref || "",
+          roundCode: r.round_code ?? 0,
+          honba: r.honba ?? 0,
+          gameLabel: g.label,
+          roundName: r.round_name,
+          honbaIdx: r.honba ?? 0,
+          players: r.players.map((p) => p.name),
+          agaris: r.agaris || [],
+        });
+      });
+    });
+    events.sort((a, b) =>
+      (a.startTime - b.startTime) ||
+      a.ref.localeCompare(b.ref) ||
+      (a.roundCode - b.roundCode) ||
+      (a.honba - b.honba)
+    );
+
+    const nthByPlayer = {};
+    const firstHit = {}; // {yakuName: {playerName: {nth, gameLabel, roundName, honba}}}
+    const huleCount = {}; // {playerName: 总和了数 (用来给表头显示)}
+
+    events.forEach((e) => {
+      // 1. 参与的玩家 nth+=1
+      e.players.forEach((p) => { nthByPlayer[p] = (nthByPlayer[p] || 0) + 1; });
+      // 2. 该局每条和了 → 记录役达成
+      e.agaris.forEach((a) => {
+        const w = a.who_name;
+        if (!w) return;
+        huleCount[w] = (huleCount[w] || 0) + 1;
+        // 同一和了里同役只算一次
+        const seen = new Set();
+        a.yaku.forEach((y) => {
+          if (seen.has(y.name)) return;
+          seen.add(y.name);
+          if (!firstHit[y.name]) firstHit[y.name] = {};
+          if (!firstHit[y.name][w]) {
+            firstHit[y.name][w] = {
+              nth: nthByPlayer[w],
+              gameLabel: e.gameLabel,
+              roundName: e.roundName,
+              honba: e.honbaIdx,
+              startTime: e.startTime,
+            };
+          }
+        });
+      });
+    });
+
+    return { firstHit, huleCount, allPlayers: Object.keys(nthByPlayer).sort() };
+  }
+
+  function renderYakuFirst(games) {
+    const tbl = $("yaku-first");
+    tbl.classList.add("yaku-first");
+    if (!games.length) {
+      tbl.innerHTML = '<tbody><tr><td class="dim">无数据</td></tr></tbody>';
+      return;
+    }
+    const { firstHit, huleCount, allPlayers } = aggregateYakuFirst(games);
+    const yakuList = Object.keys(firstHit);
+    if (!yakuList.length) {
+      tbl.innerHTML = '<tbody><tr><td class="dim">没有任何和了</td></tr></tbody>';
+      return;
+    }
+
+    // 役按"任一玩家最早达成的 nth 升序"排（更先达成的役排前面）
+    const earliestByYaku = {};
+    yakuList.forEach((y) => {
+      let m = Infinity;
+      Object.values(firstHit[y]).forEach((rec) => { if (rec.nth < m) m = rec.nth; });
+      earliestByYaku[y] = m;
+    });
+    yakuList.sort((a, b) => (earliestByYaku[a] - earliestByYaku[b]) || a.localeCompare(b, "zh"));
+
+    // 表头: 役 + 每个玩家
+    const head = `<thead><tr>
+      <th style="text-align:left">役</th>
+      ${allPlayers.map(p => `<th>${escapeHTML(p)}<div class="dim" style="font-weight:400">${huleCount[p] || 0} 和</div></th>`).join("")}
+    </tr></thead>`;
+
+    const body = "<tbody>" + yakuList.map((y) => {
+      // 找该役的最快达成者 (按 nth, 同 nth 谁先按 startTime 排)
+      const rows = firstHit[y];
+      const champions = new Set();
+      const fastest = earliestByYaku[y];
+      Object.entries(rows).forEach(([p, rec]) => {
+        if (rec.nth === fastest) champions.add(p);
+      });
+
+      const cells = [`<td>${escapeHTML(y)}</td>`];
+      allPlayers.forEach((p) => {
+        const rec = rows[p];
+        if (!rec) {
+          cells.push('<td class="dim">·</td>');
+          return;
+        }
+        const isChamp = champions.has(p);
+        const honbaSuffix = rec.honba > 0 ? `${rec.honba}本场` : "";
+        const place = `${rec.gameLabel} ${rec.roundName}${honbaSuffix}`;
+        const cls = isChamp ? "gold" : "";
+        cells.push(`<td class="${cls}">${isChamp ? "🥇 " : ""}第 ${rec.nth} 局<span class="when">${escapeHTML(place)}</span></td>`);
+      });
+      return cells.join("");
+    }).join("\n") + "</tbody>";
+
+    tbl.innerHTML = head + body;
+  }
+
   function escapeHTML(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
@@ -1274,6 +1442,8 @@
     $("scope").textContent = `范围: ${games.length} 场 · ${totalRounds} 局${player ? " · 仅 " + player : ""}`;
     renderOverview(aggregate(games, player));
     renderYaku(aggregateYaku(games, player));
+    // 先达成榜永远展示全部玩家（单玩家筛选无意义）
+    renderYakuFirst(games);
   }
 })();
 </script>
