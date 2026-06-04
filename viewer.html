@@ -500,6 +500,7 @@
               score_class: a.score_class || null,
               yaku: parseYakuEntries(a.yaku || []),
               point_won: pointWon,
+              delta: Array.isArray(delta) ? Array.from(delta) : [],
             });
           }
         }
@@ -1025,6 +1026,7 @@
         if (r.ending_type === "和了") {
           r.agaris.forEach((a) => {
             const winner = a.who_name;
+            const ad = a.delta || [];  // 该条 agari 的 4 家明细 (老 report.json 没这字段时为 [])
             // 和了归属者
             if (!playerFilter || winner === playerFilter) {
               if (winner) {
@@ -1038,25 +1040,37 @@
                 const wp = r.players.find((p) => p.name === winner);
                 if (wp && wp.is_dealer) ps.dealer_hule += 1;
                 if (wp && wp.fulu_count > 0) ps.fulu_hule += 1;
+                // 单次最高赢: agari.delta[winner] 最准, 没有 fallback point_won
+                const wonOnce = (wp && ad.length > wp.seat) ? Math.max(ad[wp.seat], 0) : a.point_won;
+                if (wonOnce > ps.max_won) ps.max_won = wonOnce;
               }
             }
-            // 放铳者
+            // 放铳者: 单次最高放铳失分
             if (!a.tsumo && a.from_name) {
               if (!playerFilter || a.from_name === playerFilter) {
                 const fps = get(a.from_name);
                 fps.fangchong += 1;
-                // 失点 = round 里 from 的 delta 负值;但更直接的是 a.delta[from],未存进 viewer json,
-                // 用聚合: 在该和了中 from 的失点 = -a.point_won 不准(供托/本场)。退而求其次用 round.players 的 delta累加.
-                // 这里我们简单以"放铳次数"为主指标,失点用整局 from 的 delta 近似(下方在 ronComplete 里补)
+                const fp = r.players.find((p) => p.name === a.from_name);
+                if (fp && ad.length > fp.seat) {
+                  const lost = -ad[fp.seat];
+                  fps.fangchong_point += Math.max(lost, 0);
+                  if (fp.fulu_count > 0) fps.fulu_fangchong += 1;
+                  if (lost > fps.max_lost_ron) fps.max_lost_ron = lost;
+                }
               }
             }
-            // 自摸时其他人被自摸
+            // 自摸时其他人被自摸 + 单次最高被自摸失分
             if (a.tsumo) {
               r.players.forEach((p) => {
                 if (p.name === winner) return;
                 if (playerFilter && p.name !== playerFilter) return;
                 const bps = get(p.name);
                 bps.beizimo += 1;
+                if (ad.length > p.seat) {
+                  const lost = -ad[p.seat];
+                  bps.beizimo_point += Math.max(lost, 0);
+                  if (lost > bps.max_lost_tsumo) bps.max_lost_tsumo = lost;
+                }
               });
             }
           });
@@ -1103,6 +1117,10 @@
       hule: 0, zimo: 0, dealer_hule: 0, hule_point: 0, han_total: 0,
       fangchong: 0, fangchong_point: 0,
       beizimo: 0, beizimo_point: 0,
+      // 单次极值 (按 agari 粒度, 每条 agari 算一次)
+      max_won: 0,             // 单次和了最高得分
+      max_lost_ron: 0,        // 单次放铳最高失分 (绝对值, 取负数中绝对值最大者)
+      max_lost_tsumo: 0,      // 单次被自摸最高失分
       reach: 0, reach_won: 0, reach_dealin: 0, reach_draw_tenpai: 0,
       reach_draw_noten: 0, reach_other: 0, reach_balance: 0,
       fulu: 0, fulu_hule: 0, fulu_fangchong: 0,
@@ -1197,12 +1215,21 @@
     { id: "avg_hule", label: "平均和了",
       sortVal: (p) => safeR(p.hule_point, p.hule),
       render: (p) => fmtNum(safeR(p.hule_point, p.hule)) },
+    { id: "max_won", label: "单次最高赢",
+      sortVal: (p) => p.max_won,
+      render: (p) => p.max_won ? `<span class="pos">+${fmtNum(p.max_won)}</span>` : "-" },
     { id: "avg_fangchong", label: "平均放铳",
       sortVal: (p) => safeR(p.fangchong_point, p.fangchong),
       render: (p) => fmtNum(safeR(p.fangchong_point, p.fangchong)) },
+    { id: "max_lost_ron", label: "单次最高放铳",
+      sortVal: (p) => p.max_lost_ron,
+      render: (p) => p.max_lost_ron ? `<span class="neg">-${fmtNum(p.max_lost_ron)}</span>` : "-" },
     { id: "avg_beizimo", label: "平均被自摸",
       sortVal: (p) => safeR(p.beizimo_point, p.beizimo),
       render: (p) => fmtNum(safeR(p.beizimo_point, p.beizimo)) },
+    { id: "max_lost_tsumo", label: "单次最高被自摸",
+      sortVal: (p) => p.max_lost_tsumo,
+      render: (p) => p.max_lost_tsumo ? `<span class="neg">-${fmtNum(p.max_lost_tsumo)}</span>` : "-" },
     { id: "reach_avg_balance", label: "立直均收",
       sortVal: (p) => (p.reach ? p.reach_balance / p.reach : 0),
       render: (p) => {

@@ -113,6 +113,7 @@ def build(games):
                         "score_class": a.get("score_class"),
                         "yaku": _parse_yaku_entries(a.get("yaku", [])),
                         "point_won": point_won,
+                        "delta": list(delta),  # 4 元素, 单次输赢明细 (含本场+供托加成)
                     })
 
             out_rounds.append({
