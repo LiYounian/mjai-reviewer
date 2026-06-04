@@ -147,6 +147,13 @@
           "东1-2" 表示东风场1局2连庄。
         </span>
       </h2>
+      <div class="toolbar" style="margin-bottom:8px">
+        <label>过滤</label>
+        <button class="toggle yaku-first-mode-btn" data-mode="all">全部</button>
+        <button class="yaku-first-mode-btn" data-mode="menzen">无副露 (门清)</button>
+        <button class="yaku-first-mode-btn" data-mode="fulu">有副露</button>
+        <span class="meta-info" style="font-size:11px;margin-left:8px">副露 = 吃 / 碰 / 大明杠 / 加杠（暗杠不算副露）</span>
+      </div>
       <div class="panel"><table id="yaku-first"></table></div>
     </div>
 
@@ -854,6 +861,7 @@
   let DATA = null;
   let MODE = "count"; // "count" | "ratio"
   let OVERVIEW_SORT = { col: "avg_place", dir: "asc" }; // 默认按均顺升序
+  let YAKU_FIRST_FULU = "all"; // 'all' | 'menzen' | 'fulu'
 
   const $ = (id) => document.getElementById(id);
   const fmtPct = (x) => (x == null || isNaN(x) ? "-" : (x * 100).toFixed(1) + "%");
@@ -944,6 +952,15 @@
 
     gameSel.addEventListener("change", refresh);
     playerSel.addEventListener("change", refresh);
+    document.querySelectorAll(".yaku-first-mode-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        YAKU_FIRST_FULU = btn.dataset.mode;
+        document.querySelectorAll(".yaku-first-mode-btn").forEach((b) => {
+          b.classList.toggle("toggle", b === btn);
+        });
+        refresh();
+      });
+    });
     $("mode-btn").addEventListener("click", () => {
       MODE = MODE === "count" ? "ratio" : "count";
       $("mode-btn").textContent = MODE === "count" ? "次数" : "比例";
@@ -1293,11 +1310,14 @@
   //   5. 行按 "最早达成的 nth" 升序排 (常见役排前)
   // 注意: 单玩家筛选 (player-sel) 不影响这表 — 显示全玩家比较才有意义
   // ============================================================
-  function aggregateYakuFirst(games) {
+  // fuluFilter: 'all' | 'menzen' (无副露) | 'fulu' (有副露)
+  // 注意 nth 计数永远基于"全部参与局"，不受 filter 影响 — filter 只影响哪条和了能算"达成"
+  function aggregateYakuFirst(games, fuluFilter = "all") {
     const events = [];
     games.forEach((g) => {
       const t = g.start_time ?? 0;
       g.rounds.forEach((r) => {
+        // ref 不带日期版本: ref 里第一段 "260530-..." 的前 6 位就是日期，去掉
         events.push({
           startTime: t,
           ref: g.ref || "",
@@ -1305,7 +1325,7 @@
           honba: r.honba ?? 0,
           gameLabel: g.label,
           roundName: r.round_name,
-          players: r.players.map((p) => p.name),
+          players: r.players,  // 保留完整 players, 后面要查 fulu_count
           agaris: r.agaris || [],
         });
       });
@@ -1318,16 +1338,20 @@
     );
 
     const nthByPlayer = {};
-    // {yakuName: { firstWinner, firstNth, firstPlace, totalCount, eventOrder }}
-    // eventOrder = 这个役在事件流里第一次出现的全局序号（事件 index, 用来给"役"排序）
     const yakuMeta = {};
 
     events.forEach((e, eventIdx) => {
-      e.players.forEach((p) => { nthByPlayer[p] = (nthByPlayer[p] || 0) + 1; });
+      e.players.forEach((p) => { nthByPlayer[p.name] = (nthByPlayer[p.name] || 0) + 1; });
 
       e.agaris.forEach((a) => {
         const w = a.who_name;
         if (!w) return;
+        // 副露过滤: 看胡牌玩家在该局是否副露
+        const winPlayer = e.players.find((p) => p.name === w);
+        const hasFulu = winPlayer ? (winPlayer.fulu_count > 0) : false;
+        if (fuluFilter === "menzen" && hasFulu) return;
+        if (fuluFilter === "fulu" && !hasFulu) return;
+
         // 同一和了里同役只算一次
         const seen = new Set();
         a.yaku.forEach((y) => {
@@ -1359,15 +1383,14 @@
       tbl.innerHTML = '<tbody><tr><td class="dim">无数据</td></tr></tbody>';
       return;
     }
-    const meta = aggregateYakuFirst(games);
+    const meta = aggregateYakuFirst(games, YAKU_FIRST_FULU);
     const yakuList = Object.keys(meta);
     if (!yakuList.length) {
-      tbl.innerHTML = '<tbody><tr><td class="dim">没有任何和了</td></tr></tbody>';
+      tbl.innerHTML = `<tbody><tr><td class="dim">当前过滤下没有任何和了</td></tr></tbody>`;
       return;
     }
 
     // 行按"最早达成"升序：先比 firstNth (累计第几局)，再比 eventOrder (事件流序)。
-    // 这样常见役（立直/断幺九/宝牌）会排在前面，七对子/小三元等罕见役排后。
     yakuList.sort((a, b) =>
       (meta[a].firstNth - meta[b].firstNth) ||
       (meta[a].eventOrder - meta[b].eventOrder) ||
@@ -1378,17 +1401,18 @@
       <th style="text-align:left">番型</th>
       <th style="text-align:left">🥇 最先达成者</th>
       <th>第几局</th>
-      <th style="text-align:left">第几场</th>
+      <th>第几场</th>
       <th>日麻局名</th>
       <th style="text-align:left">时间</th>
     </tr></thead>`;
 
     const body = "<tbody>" + yakuList.map((y) => {
       const m = meta[y];
-      // 日麻局名简写: "东1局" + honba=2 -> "东1-2"
-      // honba=0 时不带连庄数, 直接 "东1"
+      // 日麻局名: 永远 东1-N 格式 (N=0 时也写, 保持一致)
       const wind = (m.firstRoundName || "").replace(/局.*/, "");  // "东1"
-      const tag = m.firstHonba > 0 ? `${wind}-${m.firstHonba}` : wind;
+      const tag = `${wind}-${m.firstHonba || 0}`;
+      // 第几场: 只取 #N (label 形如 "#4 260530", 时间已在右边时间列)
+      const gameNo = (m.firstGameLabel || "").split(" ")[0] || "";
       const dateStr = m.firstStartTime
         ? new Date(m.firstStartTime * 1000).toLocaleString("zh-CN", { hour12: false })
         : "-";
@@ -1396,7 +1420,7 @@
         <td style="text-align:left">${escapeHTML(y)}</td>
         <td style="text-align:left" class="gold">🥇 ${escapeHTML(m.firstWinner)}</td>
         <td>${m.firstNth}</td>
-        <td style="text-align:left">${escapeHTML(m.firstGameLabel)}</td>
+        <td>${escapeHTML(gameNo)}</td>
         <td>${escapeHTML(tag)}</td>
         <td style="text-align:left" class="dim">${escapeHTML(dateStr)}</td>
       </tr>`;
