@@ -79,5 +79,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/mjai-tool-${{ matrix.platform }}.zip
-          generate_release_notes: true
+          # release 正文从仓库根 RELEASE_NOTES.md 读, 用户向的更新内容自己写
+          # 不让 GitHub 自动生成 commit list (那个会塞 'Full Changelog' 链接 + 一堆开发细节)
+          body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
