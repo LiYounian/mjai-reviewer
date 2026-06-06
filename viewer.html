@@ -100,6 +100,34 @@
   /* 先达成榜：金牌格 */
   .gold { color: var(--good); font-weight: 600; }
   .yaku-first .when { font-size: 11px; color: var(--muted); display: block; margin-top: 1px; }
+
+  /* 比赛排名表 */
+  .contest-config { display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; align-items: center; }
+  .contest-config > .row-label { color: var(--muted); font-size: 12px; align-self: start; padding-top: 5px; }
+  .contest-config > .row-body { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .contest-config input[type="datetime-local"],
+  .contest-config input[type="number"] {
+    background: #0d1117; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 4px 8px; font: inherit;
+  }
+  .contest-config input[type="number"] { width: 80px; }
+  .contest-config input[type="number"].score-input { width: 70px; }
+  .contest-config input[type="number"].fandian-input { width: 90px; }
+  .contest-config .check-pill {
+    display: inline-flex; gap: 6px; align-items: center; padding: 3px 10px;
+    border: 1px solid var(--border); border-radius: 14px; cursor: pointer; font-size: 12px;
+    color: var(--muted); user-select: none;
+  }
+  .contest-config .check-pill input { margin: 0; }
+  .contest-config .check-pill.on { color: var(--accent); border-color: var(--accent); background: rgba(88,166,255,0.1); }
+  .contest-config .score-grid { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .contest-config .score-grid .score-cell { display: flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); }
+  #contest-rank tbody tr:nth-child(1) td:nth-child(1),
+  #contest-rank tbody tr:nth-child(1) td:nth-child(2) { color: #f0c245; font-weight: 600; }
+  #contest-rank tbody tr:nth-child(2) td:nth-child(1),
+  #contest-rank tbody tr:nth-child(2) td:nth-child(2) { color: #c0c0c0; font-weight: 600; }
+  #contest-rank tbody tr:nth-child(3) td:nth-child(1),
+  #contest-rank tbody tr:nth-child(3) td:nth-child(2) { color: #cd7f32; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -134,8 +162,66 @@
     </div>
 
     <div id="content" style="display:none">
+      <h2>筛选范围
+        <span class="meta-info" style="font-weight:400;font-size:12px;margin-left:8px">
+          下方所有表（总览 / 比赛排名表 / 番型 / 先达成榜）都受这里限制。
+        </span>
+      </h2>
+      <div class="panel" style="padding:14px 16px;margin-bottom:14px">
+        <div class="contest-config">
+          <span class="row-label">牌局类型</span>
+          <div class="row-body" id="contest-modes">
+            <label class="check-pill on"><input type="checkbox" data-mode="4E" checked>四人东风</label>
+            <label class="check-pill on"><input type="checkbox" data-mode="4S" checked>四人半庄</label>
+            <label class="check-pill on"><input type="checkbox" data-mode="3E" checked>三人东风</label>
+            <label class="check-pill on"><input type="checkbox" data-mode="3S" checked>三人半庄</label>
+          </div>
+
+          <span class="row-label">时间段</span>
+          <div class="row-body">
+            <input type="datetime-local" id="contest-time-start">
+            <span class="dim">~</span>
+            <input type="datetime-local" id="contest-time-end">
+            <button id="contest-time-clear" class="meta-info" style="padding:3px 8px">清空</button>
+          </div>
+
+          <span class="row-label">对局数</span>
+          <div class="row-body">
+            <label class="meta-info">每位玩家前</label>
+            <input type="number" id="contest-topn" min="1" placeholder="不限">
+            <label class="meta-info">局（按时间升序，留空 = 不限）。截断只影响该玩家在所有表里的统计，不会丢掉同场的其他玩家。</label>
+          </div>
+        </div>
+        <div class="meta-info" id="contest-scope" style="margin-top:10px;font-size:11px"></div>
+      </div>
+
       <h2>总览</h2>
       <div class="panel"><table id="overview"></table></div>
+
+      <h2>比赛排名表
+        <span class="meta-info" style="font-weight:400;font-size:12px;margin-left:8px">
+          总分 = 顺位分 + 点数分(=(持点 - 返点)/1000)，按总分降序。
+        </span>
+      </h2>
+      <div class="panel" style="padding:14px 16px;margin-bottom:14px">
+        <div class="contest-config">
+          <span class="row-label">顺位分</span>
+          <div class="row-body score-grid" id="contest-uma-row">
+            <span class="score-cell">1 位 <input type="number" class="score-input" id="contest-uma-1" value="30" step="0.1"></span>
+            <span class="score-cell">2 位 <input type="number" class="score-input" id="contest-uma-2" value="10" step="0.1"></span>
+            <span class="score-cell">3 位 <input type="number" class="score-input" id="contest-uma-3" value="-10" step="0.1"></span>
+            <span class="score-cell" id="contest-uma-4-cell">4 位 <input type="number" class="score-input" id="contest-uma-4" value="-30" step="0.1"></span>
+            <span class="meta-info" style="font-size:11px;margin-left:8px" id="contest-uma-hint">三麻自动忽略 4 位</span>
+          </div>
+
+          <span class="row-label">返点</span>
+          <div class="row-body">
+            <input type="number" id="contest-fandian" class="fandian-input" value="30000" step="100">
+            <span class="meta-info" style="font-size:11px">点数分 = (持点 - 返点) / 1000，保留 1 位小数。日麻常用 4 麻 30000 / 3 麻 35000。</span>
+          </div>
+        </div>
+      </div>
+      <div class="panel"><table id="contest-rank"></table></div>
 
       <h2>番型</h2>
       <div class="panel"><table id="yaku"></table></div>
@@ -929,15 +1015,8 @@
     $("content").style.display = "";
     $("export-btn").style.display = "";
 
-    // 牌谱下拉
+    // 牌谱下拉的 options 由全局筛选刷新时动态生成 (syncGameSelOptions)，这里只管 listener。
     const gameSel = $("game-sel");
-    gameSel.innerHTML = '<option value="__all__">全部 (' + DATA.games.length + " 场)</option>";
-    DATA.games.forEach((g, i) => {
-      const o = document.createElement("option");
-      o.value = String(i);
-      o.textContent = `${g.label}  ${g.rule_disp || ""}  [${g.names.filter(Boolean).join(", ")}]`;
-      gameSel.appendChild(o);
-    });
 
     // 玩家下拉(去重所有出现过的玩家名)
     const allNames = new Set();
@@ -968,6 +1047,7 @@
       refresh();
     });
 
+    bindContestControls();
     refresh();
   }
 
@@ -983,12 +1063,13 @@
 
   // ===== 聚合 =====
   // 给定 games + 可选 playerFilter, 返回 {玩家名 -> 指标}
-  function aggregate(games, playerFilter) {
+  function aggregate(games, playerFilter, skip) {
     const stats = {};
     const get = (n) => {
       if (!stats[n]) stats[n] = blank(n);
       return stats[n];
     };
+    const isSkipped = (g, name) => skip && skip[g.ref] && skip[g.ref].has(name);
 
     games.forEach((g) => {
       const place_of = {};
@@ -996,6 +1077,7 @@
       // 全场顺位/收支(只有筛"全部牌谱"才计入对局数;筛单场也只有 1 场)
       g.final.forEach((f) => {
         if (playerFilter && f.name !== playerFilter) return;
+        if (isSkipped(g, f.name)) return;
         const ps = get(f.name);
         ps.games += 1;
         ps.placements[f.placement - 1] += 1;
@@ -1006,6 +1088,7 @@
         // 玩家粒度统计
         r.players.forEach((p) => {
           if (playerFilter && p.name !== playerFilter) return;
+          if (isSkipped(g, p.name)) return;
           const ps = get(p.name);
           ps.rounds += 1;
           if (p.is_dealer) ps.dealer_rounds += 1;
@@ -1029,7 +1112,7 @@
             const ad = a.delta || [];  // 该条 agari 的 4 家明细 (老 report.json 没这字段时为 [])
             // 和了归属者
             if (!playerFilter || winner === playerFilter) {
-              if (winner) {
+              if (winner && !isSkipped(g, winner)) {
                 const ps = get(winner);
                 ps.hule += 1;
                 ps.hule_point += a.point_won;
@@ -1046,7 +1129,7 @@
               }
             }
             // 放铳者: 单次最高放铳失分
-            if (!a.tsumo && a.from_name) {
+            if (!a.tsumo && a.from_name && !isSkipped(g, a.from_name)) {
               if (!playerFilter || a.from_name === playerFilter) {
                 const fps = get(a.from_name);
                 fps.fangchong += 1;
@@ -1064,6 +1147,7 @@
               r.players.forEach((p) => {
                 if (p.name === winner) return;
                 if (playerFilter && p.name !== playerFilter) return;
+                if (isSkipped(g, p.name)) return;
                 const bps = get(p.name);
                 bps.beizimo += 1;
                 if (ad.length > p.seat) {
@@ -1078,6 +1162,7 @@
           // 用整局 player.delta 累加放铳/被自摸失点(更准)
           r.players.forEach((p) => {
             if (playerFilter && p.name !== playerFilter) return;
+            if (isSkipped(g, p.name)) return;
             const ps = get(p.name);
             // 这里粗略: 玩家本局 delta < 0 视为失点；区分放铳/被自摸需要看 agari
             // 是放铳者：找一条 agari 的 from_name == p.name
@@ -1095,6 +1180,7 @@
         } else if (r.ending_type === "流局") {
           r.players.forEach((p) => {
             if (playerFilter && p.name !== playerFilter) return;
+            if (isSkipped(g, p.name)) return;
             const ps = get(p.name);
             ps.liuju += 1;
             if (p.delta > 0) ps.liuju_tenpai += 1;
@@ -1133,11 +1219,12 @@
   // ratio 分母 = 该玩家总和了数(仅在该筛选范围内)
   // 同一和了里同名役只算一次出现(宝牌(2飜)+赤宝牌等)
   // 顺带记下每个役在筛选范围内的"首次出现序号",供出现先后排序用
-  function aggregateYaku(games, playerFilter) {
+  function aggregateYaku(games, playerFilter, skip) {
     const yakuByPlayer = {};
     const huleByPlayer = {};
     const firstSeen = {};
     let order = 0;
+    const isSkipped = (g, name) => skip && skip[g.ref] && skip[g.ref].has(name);
     games.forEach((g) => {
       g.rounds.forEach((r) => {
         if (r.ending_type !== "和了") return;
@@ -1145,6 +1232,7 @@
           const w = a.who_name;
           if (!w) return;
           if (playerFilter && w !== playerFilter) return;
+          if (isSkipped(g, w)) return;
           huleByPlayer[w] = (huleByPlayer[w] || 0) + 1;
           if (!yakuByPlayer[w]) yakuByPlayer[w] = {};
           const seen = new Set();
@@ -1339,8 +1427,9 @@
   // ============================================================
   // fuluFilter: 'all' | 'menzen' (无副露) | 'fulu' (有副露)
   // 注意 nth 计数永远基于"全部参与局"，不受 filter 影响 — filter 只影响哪条和了能算"达成"
-  function aggregateYakuFirst(games, fuluFilter = "all") {
+  function aggregateYakuFirst(games, fuluFilter = "all", skip) {
     const events = [];
+    const skipOf = (ref) => (skip && skip[ref]) || null;
     games.forEach((g) => {
       const t = g.start_time ?? 0;
       g.rounds.forEach((r) => {
@@ -1354,6 +1443,7 @@
           roundName: r.round_name,
           players: r.players,  // 保留完整 players, 后面要查 fulu_count
           agaris: r.agaris || [],
+          skipSet: skipOf(g.ref),
         });
       });
     });
@@ -1368,11 +1458,15 @@
     const yakuMeta = {};
 
     events.forEach((e, eventIdx) => {
-      e.players.forEach((p) => { nthByPlayer[p.name] = (nthByPlayer[p.name] || 0) + 1; });
+      e.players.forEach((p) => {
+        if (e.skipSet && e.skipSet.has(p.name)) return;
+        nthByPlayer[p.name] = (nthByPlayer[p.name] || 0) + 1;
+      });
 
       e.agaris.forEach((a) => {
         const w = a.who_name;
         if (!w) return;
+        if (e.skipSet && e.skipSet.has(w)) return;
         // 副露过滤: 看胡牌玩家在该局是否副露
         const winPlayer = e.players.find((p) => p.name === w);
         const hasFulu = winPlayer ? (winPlayer.fulu_count > 0) : false;
@@ -1404,13 +1498,13 @@
     return yakuMeta;
   }
 
-  function renderYakuFirst(games) {
+  function renderYakuFirst(games, skip) {
     const tbl = $("yaku-first");
     if (!games.length) {
       tbl.innerHTML = '<tbody><tr><td class="dim">无数据</td></tr></tbody>';
       return;
     }
-    const meta = aggregateYakuFirst(games, YAKU_FIRST_FULU);
+    const meta = aggregateYakuFirst(games, YAKU_FIRST_FULU, skip);
     const yakuList = Object.keys(meta);
     if (!yakuList.length) {
       tbl.innerHTML = `<tbody><tr><td class="dim">当前过滤下没有任何和了</td></tr></tbody>`;
@@ -1460,15 +1554,226 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  // ===== 比赛排名表 =====
+  // 模式识别：(nplayers, rule_disp) -> "4E" / "4S" / "3E" / "3S" / null
+  function gameMode(g) {
+    const np = g.nplayers === 3 ? 3 : 4;
+    const disp = g.rule_disp || "";
+    let local = "S"; // 半庄默认
+    if (disp.includes("东") && !disp.includes("南")) local = "E";
+    else if (disp.includes("南")) local = "S";
+    else if (g.rounds && g.rounds.length) {
+      // fallback：所有局 round_code < 4 视为东风（雀魂大会戦无 disp 时）
+      const maxCode = Math.max(...g.rounds.map((r) => r.round_code || 0));
+      local = maxCode < 4 ? "E" : "S";
+    }
+    return `${np}${local}`;
+  }
+
+  function readContestModes() {
+    const set = new Set();
+    document.querySelectorAll("#contest-modes input[type=checkbox]").forEach((c) => {
+      if (c.checked) set.add(c.dataset.mode);
+    });
+    return set;
+  }
+
+  function readContestTimeRange() {
+    const s = $("contest-time-start").value;
+    const e = $("contest-time-end").value;
+    const sec = (v) => {
+      if (!v) return null;
+      const t = Date.parse(v);
+      return isNaN(t) ? null : Math.floor(t / 1000);
+    };
+    return { start: sec(s), end: sec(e) };
+  }
+
+  function readContestUma(np) {
+    const v = (id) => parseFloat($(id).value);
+    return np === 3
+      ? [v("contest-uma-1"), v("contest-uma-2"), v("contest-uma-3"), 0]
+      : [v("contest-uma-1"), v("contest-uma-2"), v("contest-uma-3"), v("contest-uma-4")];
+  }
+
+  function fmt1(x) {
+    if (x == null || isNaN(x)) return "-";
+    const s = (Math.round(x * 10) / 10).toFixed(1);
+    return s;
+  }
+
+  // 全局筛选（牌局类型 + 时间段 + 每人前 N 局）
+  // 返回 { filteredGames, skip, totalGames, topN }，所有表共用同一份结果
+  // skip[ref] = Set<玩家名> ：该场该玩家被 topN 截断，统计时跳过他在该场的所有贡献
+  function applyGlobalFilter() {
+    const modes = readContestModes();
+    const { start, end } = readContestTimeRange();
+    const topNRaw = parseInt($("contest-topn").value, 10);
+    const topN = Number.isFinite(topNRaw) && topNRaw > 0 ? topNRaw : null;
+    const allGames = DATA.games || [];
+
+    const eligible = allGames.filter((g) => {
+      if (!modes.has(gameMode(g))) return false;
+      if (start != null && (g.start_time == null || g.start_time < start)) return false;
+      if (end != null && (g.start_time == null || g.start_time > end)) return false;
+      return true;
+    });
+
+    // topN 是按"玩家个人累计第 K 局"切，需要时间升序遍历
+    const sorted = [...eligible].sort((a, b) => {
+      const ta = a.start_time ?? 0, tb = b.start_time ?? 0;
+      if (ta !== tb) return ta - tb;
+      return (a.ref || "").localeCompare(b.ref || "");
+    });
+
+    const skip = {};
+    if (topN) {
+      const counts = {};
+      for (const g of sorted) {
+        const skipped = new Set();
+        for (const f of g.final) {
+          const n = f.name;
+          if (!n) continue;
+          counts[n] = (counts[n] || 0) + 1;
+          if (counts[n] > topN) skipped.add(n);
+        }
+        if (skipped.size) skip[g.ref] = skipped;
+      }
+    }
+
+    return { filteredGames: sorted, skip, totalGames: allGames.length, topN };
+  }
+
+  function renderContestRank(filteredGames, skip) {
+    const fandian = parseFloat($("contest-fandian").value) || 0;
+    const stats = {};
+    const get = (name) => {
+      if (!stats[name]) stats[name] = { name, games: 0, uma: 0, points: 0, places: [0, 0, 0, 0] };
+      return stats[name];
+    };
+
+    for (const g of filteredGames) {
+      const np = g.nplayers === 3 ? 3 : 4;
+      const uma = readContestUma(np);
+      const skipSet = skip && skip[g.ref];
+      for (const f of g.final) {
+        const name = f.name;
+        if (!name) continue;
+        if (skipSet && skipSet.has(name)) continue;
+        const s = get(name);
+        s.games++;
+        s.places[(f.placement || 1) - 1]++;
+        s.uma += uma[(f.placement || 1) - 1] || 0;
+        s.points += (f.point - fandian) / 1000;
+      }
+    }
+
+    const rows = Object.values(stats)
+      .map((s) => ({ ...s, total: s.uma + s.points }))
+      .sort((a, b) => b.total - a.total);
+
+    const t = $("contest-rank");
+    if (!rows.length) {
+      t.innerHTML = '<tbody><tr><td class="empty">没有匹配筛选条件的牌谱</td></tr></tbody>';
+      return;
+    }
+
+    const head = `<thead><tr>
+      <th>名次</th><th>玩家</th><th>对局数</th>
+      <th>总分</th><th>顺位分</th><th>点数分</th>
+      <th>1 位</th><th>2 位</th><th>3 位</th><th>4 位</th>
+      <th>平均顺位</th>
+    </tr></thead>`;
+    const body = rows.map((r, i) => {
+      const sumPlaces = r.places.reduce((a, b) => a + b, 0);
+      const avg = sumPlaces ? (r.places.reduce((acc, c, idx) => acc + c * (idx + 1), 0) / sumPlaces) : null;
+      const totalCls = r.total > 0 ? "pos" : (r.total < 0 ? "neg" : "");
+      return `<tr>
+        <td>${i + 1}</td>
+        <td>${escapeHTML(r.name)}</td>
+        <td>${r.games}</td>
+        <td class="${totalCls}">${fmt1(r.total)}</td>
+        <td>${fmt1(r.uma)}</td>
+        <td>${fmt1(r.points)}</td>
+        <td>${r.places[0]}</td>
+        <td>${r.places[1]}</td>
+        <td>${r.places[2]}</td>
+        <td>${r.places[3]}</td>
+        <td>${avg == null ? "-" : avg.toFixed(2)}</td>
+      </tr>`;
+    }).join("");
+    t.innerHTML = head + `<tbody>${body}</tbody>`;
+  }
+
+  function bindContestControls() {
+    document.querySelectorAll("#contest-modes .check-pill").forEach((pill) => {
+      const cb = pill.querySelector("input");
+      const sync = () => pill.classList.toggle("on", cb.checked);
+      cb.addEventListener("change", () => { sync(); refresh(); });
+    });
+    // 全局筛选 → 触发整页 refresh
+    ["contest-time-start", "contest-time-end", "contest-topn"].forEach((id) => {
+      $(id).addEventListener("input", refresh);
+      $(id).addEventListener("change", refresh);
+    });
+    // 排名表专用 → 只重画排名表（不影响其他表）
+    ["contest-fandian", "contest-uma-1", "contest-uma-2", "contest-uma-3", "contest-uma-4"].forEach((id) => {
+      $(id).addEventListener("input", refresh);
+      $(id).addEventListener("change", refresh);
+    });
+    $("contest-time-clear").addEventListener("click", () => {
+      $("contest-time-start").value = "";
+      $("contest-time-end").value = "";
+      refresh();
+    });
+  }
+
   function refresh() {
-    const games = selectedGames();
+    const { filteredGames, skip, totalGames, topN } = applyGlobalFilter();
+
+    // 同步全局筛选范围提示
+    const filteredRefs = new Set(filteredGames.map((g) => g.ref));
+    const skippedPairs = Object.values(skip).reduce((a, s) => a + s.size, 0);
+    $("contest-scope").textContent =
+      `范围: ${filteredGames.length}/${totalGames} 场` +
+      (topN ? ` · 每人最多取前 ${topN} 局（已截断 ${skippedPairs} 个玩家场次）` : "");
+
+    // 牌谱下拉只显示通过全局筛选的场次
+    syncGameSelOptions(filteredRefs);
+
+    // 在筛选结果里再用"牌谱/玩家"下拉缩小范围
+    const games = filteredGames.filter((g) => {
+      const v = $("game-sel").value;
+      return v === "__all__" ? true : DATA.games[Number(v)]?.ref === g.ref;
+    });
     const player = selectedPlayer();
     const totalRounds = games.reduce((a, g) => a + g.rounds.length, 0);
-    $("scope").textContent = `范围: ${games.length} 场 · ${totalRounds} 局${player ? " · 仅 " + player : ""}`;
-    renderOverview(aggregate(games, player));
-    renderYaku(aggregateYaku(games, player));
+    $("scope").textContent =
+      `下方表范围: ${games.length} 场 · ${totalRounds} 局${player ? " · 仅 " + player : ""}` +
+      (topN ? ` · 已按全局 topN=${topN} 截断` : "");
+
+    renderOverview(aggregate(games, player, skip));
+    renderYaku(aggregateYaku(games, player, skip));
     // 先达成榜永远展示全部玩家（单玩家筛选无意义）
-    renderYakuFirst(games);
+    renderYakuFirst(games, skip);
+    // 比赛排名表始终用全部 filteredGames（不受"牌谱"下拉影响，按比赛口径出榜）
+    renderContestRank(filteredGames, skip);
+  }
+
+  // 让"牌谱"下拉只展示通过全局筛选的场次（玩家下拉保持不变 - 内容稳定）
+  function syncGameSelOptions(filteredRefs) {
+    const sel = $("game-sel");
+    const cur = sel.value;
+    const opts = ['<option value="__all__">全部 (' + filteredRefs.size + ' 场)</option>'];
+    DATA.games.forEach((g, i) => {
+      if (!filteredRefs.has(g.ref)) return;
+      const text = `${g.label}  ${g.rule_disp || ""}  [${g.names.filter(Boolean).join(", ")}]`;
+      opts.push(`<option value="${i}">${escapeHTML(text)}</option>`);
+    });
+    sel.innerHTML = opts.join("");
+    // 保留之前选中（如果还在）
+    if (cur !== "__all__" && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+    else sel.value = "__all__";
   }
 })();
 </script>
